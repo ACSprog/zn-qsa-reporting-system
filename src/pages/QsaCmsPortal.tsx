@@ -1,0 +1,1323 @@
+import React, { useEffect, useState, useMemo } from 'react';
+import * as XLSX from 'xlsx';
+import {
+  Lock,
+  LogOut,
+  RefreshCw,
+  Download,
+  Search,
+  Filter,
+  AlertTriangle,
+  FileSpreadsheet,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  Eye,
+  Archive,
+  ChevronRight,
+  Shield,
+  Loader2,
+  Paperclip,
+  FolderOpen,
+  Inbox,
+  BarChart3,
+  Settings,
+  Sparkles,
+  Mail,
+  EyeOff,
+  KeyRound,
+  X
+} from 'lucide-react';
+import {
+  BaseReportData,
+  FormType,
+  ReportingType,
+  ReportStatus
+} from '../types';
+import { FORMS_META } from '../config/fields';
+import { STATUS_OPTIONS } from '../config/options';
+import {
+  fetchAllReports,
+  signInWithEmail,
+  sendResetPasswordEmail,
+  signInWithMicrosoft,
+  signInWithGoogle,
+  signOutUser,
+  subscribeToAuthState,
+  verifyUserRoles,
+  fetchReporterIdentity,
+  isFirebaseConfigured
+} from '../lib/firebase';
+import { DetailDrawer } from '../components/DetailDrawer';
+import { SyncModal } from '../components/SyncModal';
+import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
+
+type CmsTab = 'inbox' | 'analytics' | 'sync' | 'settings';
+
+interface QsaCmsPortalProps {
+  onNavigatePublicSite?: () => void;
+  onNavigatePublicForm?: (form: FormType) => void;
+}
+
+export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
+  // Authentication & Authorization state
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isVerifyingAuth, setIsVerifyingAuth] = useState<boolean>(true);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [isQsaAdmin, setIsQsaAdmin] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // Active CMS Navigation Tab
+  const [activeCmsTab, setActiveCmsTab] = useState<CmsTab>('inbox');
+
+  // Reports data state
+  const [reports, setReports] = useState<BaseReportData[]>([]);
+  const [loadingReports, setLoadingReports] = useState<boolean>(false);
+  const [selectedReport, setSelectedReport] = useState<BaseReportData | null>(null);
+
+  // Submissions Inbox Filters
+  const [selectedCategoryTab, setSelectedCategoryTab] = useState<'all' | FormType>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [urgentOnly, setUrgentOnly] = useState<boolean>(false);
+  const [reportingFilter, setReportingFilter] = useState<string>('all');
+  const [hasEvidenceOnly, setHasEvidenceOnly] = useState<boolean>(false);
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [showArchived, setShowArchived] = useState<boolean>(false);
+
+  // Sync Modal state
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
+
+  // Email & Password Sign-in state
+  const [loginEmail, setLoginEmail] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('za_cms_remembered_email') || '';
+    }
+    return '';
+  });
+  const [loginPassword, setLoginPassword] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [rememberMe, setRememberMe] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return Boolean(localStorage.getItem('za_cms_remembered_email'));
+    }
+    return true;
+  });
+  const [isSubmittingAuth, setIsSubmittingAuth] = useState<boolean>(false);
+
+  // Forgot Password Dialog state
+  const [isResetModalOpen, setIsResetModalOpen] = useState<boolean>(false);
+  const [resetEmail, setResetEmail] = useState<string>('');
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetSuccess, setResetSuccess] = useState<string | null>(null);
+  const [isResetting, setIsResetting] = useState<boolean>(false);
+
+  // Subscribe to Firebase Auth
+  useEffect(() => {
+    const unsubscribe = subscribeToAuthState(async (user) => {
+      setIsVerifyingAuth(true);
+      if (user) {
+        setCurrentUser(user);
+        const roles = await verifyUserRoles(user);
+        if (!roles.isAdmin) {
+          setAuthError('Access Denied: Your account is not authorized as a Zambia Airways safety administrator.');
+          await signOutUser();
+          setIsAdmin(false);
+          setIsQsaAdmin(false);
+          setCurrentUser(null);
+        } else {
+          setIsAdmin(true);
+          setIsQsaAdmin(roles.isQsaAdmin);
+          setAuthError(null);
+        }
+      } else {
+        setCurrentUser(null);
+        setIsAdmin(false);
+        setIsQsaAdmin(false);
+      }
+      setIsVerifyingAuth(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch reports from Firestore
+  const loadReports = async () => {
+    if (!isAdmin) return;
+    setLoadingReports(true);
+    try {
+      const data = await fetchAllReports();
+      setReports(data);
+    } catch (err: any) {
+      console.error('Failed to load reports in CMS:', err);
+    } finally {
+      setLoadingReports(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAdmin) {
+      loadReports();
+    }
+  }, [isAdmin]);
+
+  const handleEmailPasswordSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    if (!loginEmail.trim() || !loginPassword) {
+      setAuthError('Please enter both your email address and password.');
+      return;
+    }
+
+    setIsSubmittingAuth(true);
+    try {
+      const res = await signInWithEmail(loginEmail, loginPassword);
+      if (res.error) {
+        setAuthError(res.error);
+      } else if (res.user) {
+        if (rememberMe) {
+          localStorage.setItem('za_cms_remembered_email', loginEmail.trim());
+        } else {
+          localStorage.removeItem('za_cms_remembered_email');
+        }
+      }
+    } catch (err: any) {
+      setAuthError(err?.message || 'Authentication error.');
+    } finally {
+      setIsSubmittingAuth(false);
+    }
+  };
+
+  const handlePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetError(null);
+    setResetSuccess(null);
+    if (!resetEmail.trim()) {
+      setResetError('Please enter your corporate email address.');
+      return;
+    }
+
+    setIsResetting(true);
+    try {
+      const res = await sendResetPasswordEmail(resetEmail.trim());
+      if (res.success) {
+        setResetSuccess(`Password reset instructions sent to ${resetEmail}. Check your inbox or spam folder.`);
+      } else {
+        setResetError(res.error || 'Failed to dispatch reset email.');
+      }
+    } catch (err: any) {
+      setResetError(err?.message || 'Failed to dispatch reset email.');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const handleSignInMicrosoft = async () => {
+    setAuthError(null);
+    try {
+      const user = await signInWithMicrosoft();
+      if (!user) {
+        setAuthError('Sign in cancelled or failed.');
+      }
+    } catch (err: any) {
+      setAuthError(err?.message || 'Authentication error.');
+    }
+  };
+
+  const handleSignInGoogle = async () => {
+    setAuthError(null);
+    try {
+      const user = await signInWithGoogle();
+      if (!user) {
+        setAuthError('Sign in cancelled or failed.');
+      }
+    } catch (err: any) {
+      setAuthError(err?.message || 'Authentication error.');
+    }
+  };
+
+  const handleSignOut = async () => {
+    await signOutUser();
+    setCurrentUser(null);
+    setIsAdmin(false);
+    setIsQsaAdmin(false);
+    setReports([]);
+  };
+
+  // Filtered reports for Inbox
+  const filteredReports = useMemo(() => {
+    return reports.filter((r) => {
+      // Archive filter
+      if (!showArchived && r.deleted) return false;
+      if (showArchived && !r.deleted) return false;
+
+      // Category filter
+      if (selectedCategoryTab !== 'all' && r.form !== selectedCategoryTab) return false;
+
+      // Status filter
+      if (statusFilter !== 'all' && r.status !== statusFilter) return false;
+
+      // Urgency filter
+      if (urgentOnly && r.urgent !== 'Yes') return false;
+
+      // Reporting filter
+      if (reportingFilter !== 'all' && r.reporting !== reportingFilter) return false;
+
+      // Has Evidence
+      if (hasEvidenceOnly && (!r.evidenceCount || r.evidenceCount <= 0)) return false;
+
+      // Date range
+      if (startDate && r.dateReported && r.dateReported < startDate) return false;
+      if (endDate && r.dateReported && r.dateReported > endDate) return false;
+
+      // Search query
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        const matchesId = r.reportId.toLowerCase().includes(query);
+        const matchesLoc = (r.location || '').toLowerCase().includes(query);
+        const matchesCat = (r.category || '').toLowerCase().includes(query);
+        const matchesFlight = (r.flightNo || '').toLowerCase().includes(query);
+        const matchesAircraft = (r.aircraftReg || '').toLowerCase().includes(query);
+        const matchesNotes = (r.notes || '').toLowerCase().includes(query);
+        if (!matchesId && !matchesLoc && !matchesCat && !matchesFlight && !matchesAircraft && !matchesNotes) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [
+    reports,
+    selectedCategoryTab,
+    statusFilter,
+    urgentOnly,
+    reportingFilter,
+    hasEvidenceOnly,
+    startDate,
+    endDate,
+    searchQuery,
+    showArchived
+  ]);
+
+  // Export to Excel / CSV
+  const handleExport = async (format: 'xlsx' | 'csv') => {
+    if (filteredReports.length === 0) return;
+
+    const exportRows = await Promise.all(
+      filteredReports.map(async (r) => {
+        let reporterName = '';
+        let reporterDept = '';
+        let reporterPos = '';
+        let reporterContact = '';
+
+        if (r.reporting !== 'Anonymous' && isQsaAdmin) {
+          const id = await fetchReporterIdentity(r.reportId);
+          if (id) {
+            reporterName = id.name || '';
+            reporterDept = id.department || '';
+            reporterPos = id.position || '';
+            reporterContact = id.contact || '';
+          }
+        }
+
+        return {
+          'Report ID': r.reportId,
+          'Form Category': r.form.toUpperCase(),
+          'Reporting Type': r.reporting,
+          'Date Reported': r.dateReported || '',
+          'Event Date': r.eventDate || '',
+          'Event Time': r.eventTime || '',
+          'Location / Station': r.location || '',
+          'Flight No': r.flightNo || '',
+          'Aircraft Reg': r.aircraftReg || '',
+          'Aircraft Type': r.aircraftType || '',
+          'Category / Type': r.category || '',
+          'Urgent Attention': r.urgent || 'No',
+          'Immediate Risk': r.exposedToRisk || 'No',
+          'Notified Anyone': r.notified || 'No',
+          'Notified Who': r.notifiedWho || '',
+          'Status': r.status || 'New',
+          'Audit Notes': r.notes || '',
+          'Evidence Files Count': r.evidenceCount || 0,
+          'Reporter Name': reporterName || '(Confidential / N/A)',
+          'Reporter Department': reporterDept || '',
+          'Reporter Position': reporterPos || '',
+          'Reporter Contact': reporterContact || ''
+        };
+      })
+    );
+
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Safety Reports');
+
+    const dateStr = new Date().toISOString().split('T')[0];
+    const filename = `Zambia_Airways_Safety_Reports_${dateStr}.${format}`;
+
+    if (format === 'xlsx') {
+      XLSX.writeFile(workbook, filename);
+    } else {
+      XLSX.writeFile(workbook, filename, { bookType: 'csv' });
+    }
+  };
+
+  // Metrics calculation
+  const metrics = useMemo(() => {
+    const total = reports.length;
+    const newCount = reports.filter((r) => (r.status || 'New') === 'New').length;
+    const urgentCount = reports.filter((r) => r.urgent === 'Yes').length;
+    const underReview = reports.filter((r) => r.status === 'Under review' || r.status === 'Action required').length;
+    const closedCount = reports.filter((r) => r.status === 'Closed').length;
+    const hazards = reports.filter((r) => r.form === 'hazard').length;
+    const incidents = reports.filter((r) => r.form === 'incident').length;
+    const accidents = reports.filter((r) => r.form === 'accident').length;
+    const concerns = reports.filter((r) => r.form === 'concern').length;
+    return { total, new: newCount, urgent: urgentCount, underReview, closed: closedCount, hazards, incidents, accidents, concerns };
+  }, [reports]);
+
+  // 1. Loading State
+  if (isVerifyingAuth) {
+    return (
+      <div className="min-h-screen bg-[#081f11] flex items-center justify-center p-4">
+        <div className="bg-[#0e3b1f] border border-[#1b8e44]/40 rounded-2xl p-8 max-w-sm w-full text-center space-y-4 shadow-2xl">
+          <div className="flex justify-center">
+            <ZambiaAirwaysLogo variant="emblem" size="md" />
+          </div>
+          <Loader2 className="w-8 h-8 animate-spin text-[#F37C1C] mx-auto" />
+          <h3 className="text-white font-extrabold text-base">
+            Connecting to QSA CMS Console...
+          </h3>
+          <p className="text-xs text-emerald-200">
+            Verifying security credentials and role-based permissions...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Not signed in / Access Denied Screen (CMS Access Barrier)
+  if (!currentUser || !isAdmin) {
+    return (
+      <div className="min-h-screen bg-[#07190e] flex flex-col justify-between py-10 px-4">
+        {/* Top ribbon */}
+        <div className="fixed top-0 left-0 right-0 h-1.5 flex z-50">
+          <div className="flex-1 bg-[#1B8E44]" />
+          <div className="w-20 bg-[#DE2010]" />
+          <div className="w-20 bg-[#1E2522]" />
+          <div className="w-24 bg-[#F37C1C]" />
+        </div>
+
+        <div className="max-w-md w-full mx-auto my-auto">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden p-7 sm:p-9 text-center space-y-6">
+            {/* Logo */}
+            <div className="flex justify-center">
+              <ZambiaAirwaysLogo variant="full" theme="light" size="md" showSubtitle={false} />
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#1B8E44]/10 text-[#1B8E44] text-xs font-black tracking-wider uppercase mb-2">
+                <Lock className="w-3.5 h-3.5 text-[#F37C1C]" />
+                QSA System CMS Console
+              </div>
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900">
+                Safety Management Login
+              </h1>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Backend Content & Safety Management System for authorized Zambia Airways flight safety officers and QSA administrators.
+              </p>
+            </div>
+
+            {authError && (
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 text-left flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span>{authError}</span>
+              </div>
+            )}
+
+            {/* Quick Demo Credentials Assistant */}
+            <div className="bg-emerald-50/90 border border-emerald-200 rounded-xl p-3.5 text-left shadow-2xs">
+              <div className="flex items-center justify-between text-xs mb-1.5">
+                <span className="font-extrabold text-emerald-950 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-[#F37C1C]" />
+                  Demo Sign-In Credentials
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginEmail('admin@zambiaairways.co.zm');
+                    setLoginPassword('safety2026');
+                    setAuthError(null);
+                  }}
+                  className="text-[11px] font-bold text-white bg-[#1B8E44] hover:bg-[#147236] px-2.5 py-1 rounded-md transition-colors shadow-2xs cursor-pointer"
+                >
+                  Click to Auto-fill
+                </button>
+              </div>
+              <div className="text-[11px] font-mono text-slate-700 bg-white/80 p-2 rounded-lg border border-emerald-200/60 space-y-0.5">
+                <div>Email: <strong className="text-slate-900 font-bold">admin@zambiaairways.co.zm</strong></div>
+                <div>Password: <strong className="text-slate-900 font-bold">safety2026</strong></div>
+              </div>
+            </div>
+
+            {/* Email & Password Authentication Form */}
+            <form onSubmit={handleEmailPasswordSignIn} className="space-y-4 text-left pt-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Corporate Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                  <input
+                    type="email"
+                    required
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="safety.officer@zambiaairways.co.zm"
+                    autoComplete="email"
+                    className="w-full pl-9 pr-3.5 py-2.5 text-xs rounded-xl border border-slate-300 focus:border-[#1B8E44] focus:ring-2 focus:ring-[#1B8E44]/20 outline-none transition-all font-medium text-slate-900 bg-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Password
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetEmail(loginEmail);
+                      setIsResetModalOpen(true);
+                      setResetError(null);
+                      setResetSuccess(null);
+                    }}
+                    className="text-[11px] font-semibold text-[#1B8E44] hover:underline"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="••••••••••••"
+                    autoComplete="current-password"
+                    className="w-full pl-9 pr-10 py-2.5 text-xs rounded-xl border border-slate-300 focus:border-[#1B8E44] focus:ring-2 focus:ring-[#1B8E44]/20 outline-none transition-all font-medium text-slate-900 bg-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 p-0.5 rounded transition-colors"
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-xs pt-1">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-[#1B8E44] focus:ring-[#1B8E44]"
+                  />
+                  <span>Remember this email</span>
+                </label>
+              </div>
+
+              {/* Primary Submit Button */}
+              <button
+                type="submit"
+                disabled={isSubmittingAuth}
+                className="w-full py-3 px-4 rounded-xl bg-[#1B8E44] hover:bg-[#147236] text-white font-extrabold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
+              >
+                {isSubmittingAuth ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Authenticating...</span>
+                  </>
+                ) : (
+                  <>
+                    <KeyRound className="w-4 h-4 text-[#F37C1C]" />
+                    <span>Sign In to QSA CMS</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            {/* SSO Options Divider */}
+            <div className="relative my-4">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-200" />
+              </div>
+              <div className="relative flex justify-center text-[10px] uppercase font-bold tracking-wider">
+                <span className="bg-white px-2.5 text-slate-400">
+                  Or corporate single sign-on
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={handleSignInMicrosoft}
+                className="w-full py-2.5 px-4 rounded-xl bg-[#0078d4] hover:bg-[#106ebe] text-white font-bold text-xs shadow-2xs transition-all flex items-center justify-center gap-2.5"
+              >
+                <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 21 21">
+                  <path d="M1 1h9v9H1z" fill="#f25022" />
+                  <path d="M11 1h9v9H11z" fill="#7fba00" />
+                  <path d="M1 11h9v9H1z" fill="#00a4ef" />
+                  <path d="M11 11h9v9H11z" fill="#ffb900" />
+                </svg>
+                <span>Sign in with Microsoft 365</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSignInGoogle}
+                className="w-full py-2.5 px-4 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs shadow-2xs transition-all flex items-center justify-center gap-2.5"
+              >
+                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                  />
+                </svg>
+                <span>Sign in with Google</span>
+              </button>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <span className="font-semibold text-slate-600">Zambia Airways Safety System</span>
+              <span className="font-mono text-[11px]">ZCAA SMS v3.2</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Password Reset Modal */}
+        {isResetModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-[#1B8E44]">
+                    <KeyRound className="w-4 h-4" />
+                  </div>
+                  <h3 className="font-extrabold text-sm text-slate-900">
+                    Reset CMS Password
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setIsResetModalOpen(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Enter your registered corporate email to receive a password reset link.
+              </p>
+
+              {resetError && (
+                <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
+                  {resetError}
+                </div>
+              )}
+
+              {resetSuccess && (
+                <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
+                  {resetSuccess}
+                </div>
+              )}
+
+              <form onSubmit={handlePasswordReset} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    placeholder="officer@zambiaairways.co.zm"
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#1B8E44] outline-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsResetModalOpen(false)}
+                    className="px-3.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isResetting}
+                    className="px-4 py-1.5 rounded-lg bg-[#1B8E44] hover:bg-[#147236] text-white text-xs font-bold shadow-2xs flex items-center gap-1.5"
+                  >
+                    {isResetting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    <span>Send Reset Email</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        <div className="text-center text-xs text-emerald-200/50">
+          Zambia Airways (2014) Limited • Quality, Safety & Airworthiness (QSA) Management Console
+        </div>
+      </div>
+    );
+  }
+
+  // 3. Full CMS Dashboard Layout
+  return (
+    <div className="min-h-screen bg-slate-100 flex flex-col md:flex-row text-slate-900 font-sans selection:bg-[#1B8E44] selection:text-white">
+      {/* ======================================================== */}
+      {/* CMS SIDEBAR */}
+      {/* ======================================================== */}
+      <aside className="w-full md:w-64 bg-[#0a2313] text-white flex flex-col justify-between shrink-0 border-r border-[#164a27] shadow-xl">
+        <div>
+          {/* Top Brand Banner */}
+          <div className="p-4 sm:p-5 border-b border-[#164a27]">
+            <ZambiaAirwaysLogo variant="full" theme="dark" size="sm" showSubtitle={false} />
+            <div className="mt-2.5 flex items-center justify-between">
+              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300">
+                QSA CMS Console
+              </span>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#F37C1C]/20 text-[#F37C1C] border border-[#F37C1C]/40">
+                v3.2 Active
+              </span>
+            </div>
+          </div>
+
+          {/* Navigation Links */}
+          <nav className="p-3 space-y-1 text-xs font-bold">
+            <button
+              onClick={() => setActiveCmsTab('inbox')}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all ${
+                activeCmsTab === 'inbox'
+                  ? 'bg-[#1B8E44] text-white shadow-sm'
+                  : 'text-emerald-100/80 hover:bg-[#123e20] hover:text-white'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <Inbox className="w-4 h-4 text-[#F37C1C]" />
+                <span>Submissions Inbox</span>
+              </div>
+              <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-black/30 text-white">
+                {metrics.total}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveCmsTab('analytics')}
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all ${
+                activeCmsTab === 'analytics'
+                  ? 'bg-[#1B8E44] text-white shadow-sm'
+                  : 'text-emerald-100/80 hover:bg-[#123e20] hover:text-white'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4 text-[#F37C1C]" />
+              <span>Safety Analytics</span>
+            </button>
+
+            <button
+              onClick={() => setActiveCmsTab('sync')}
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all ${
+                activeCmsTab === 'sync'
+                  ? 'bg-[#1B8E44] text-white shadow-sm'
+                  : 'text-emerald-100/80 hover:bg-[#123e20] hover:text-white'
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4 text-[#F37C1C]" />
+              <span>SharePoint & Excel Sync</span>
+            </button>
+
+            <button
+              onClick={() => setActiveCmsTab('settings')}
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all ${
+                activeCmsTab === 'settings'
+                  ? 'bg-[#1B8E44] text-white shadow-sm'
+                  : 'text-emerald-100/80 hover:bg-[#123e20] hover:text-white'
+              }`}
+            >
+              <Settings className="w-4 h-4 text-[#F37C1C]" />
+              <span>CMS Configuration</span>
+            </button>
+          </nav>
+        </div>
+
+        {/* Bottom Officer Status & Controls */}
+        <div className="p-3 border-t border-[#164a27] bg-[#071b0e]/70">
+          <div className="px-2.5 py-2 rounded-lg bg-[#0e3b1f] border border-[#1b8e44]/40 flex items-center justify-between">
+            <div className="min-w-0 pr-2">
+              <div className="text-xs font-extrabold text-white truncate">
+                {currentUser?.displayName || currentUser?.email}
+              </div>
+              <div className="text-[10px] text-emerald-300 flex items-center gap-1 font-medium mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                {isQsaAdmin ? 'QSA Inspector' : 'Safety Officer'}
+              </div>
+            </div>
+            <button
+              onClick={handleSignOut}
+              className="p-1.5 rounded-md hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 transition-colors"
+              title="Sign out of CMS"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* ======================================================== */}
+      {/* MAIN CMS WORKSPACE */}
+      {/* ======================================================== */}
+      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+        {/* Top CMS Header Ribbon */}
+        <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-2xs">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+            <span className="text-[#1B8E44] uppercase tracking-wider">CMS Console</span>
+            <span>/</span>
+            <span className="text-slate-900 capitalize font-extrabold">
+              {activeCmsTab === 'inbox' && 'Submissions Management'}
+              {activeCmsTab === 'analytics' && 'Safety Analytics & Metrics'}
+              {activeCmsTab === 'sync' && 'Excel & SharePoint Sync Engine'}
+              {activeCmsTab === 'settings' && 'CMS Policy Settings'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Firestore Master Connected</span>
+            </div>
+
+            <button
+              onClick={loadReports}
+              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 transition-colors flex items-center gap-1.5 text-xs font-bold"
+              title="Refresh database records"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingReports ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Refresh Data</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Tab 1: Submissions Inbox */}
+        {activeCmsTab === 'inbox' && (
+          <div className="p-4 sm:p-6 space-y-6">
+            {/* Quick Metrics Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Total</span>
+                <span className="text-2xl font-black text-slate-900 mt-0.5 block">{metrics.total}</span>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/20 shadow-2xs">
+                <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">New Pending</span>
+                <span className="text-2xl font-black text-emerald-700 mt-0.5 block">{metrics.new}</span>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-xl border border-rose-200 bg-rose-50/20 shadow-2xs">
+                <span className="text-[11px] font-bold text-rose-700 uppercase tracking-wider block">Urgent Action</span>
+                <span className="text-2xl font-black text-rose-700 mt-0.5 block">{metrics.urgent}</span>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-[11px] font-bold text-amber-600 uppercase tracking-wider block">Hazards</span>
+                <span className="text-2xl font-black text-amber-700 mt-0.5 block">{metrics.hazards}</span>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-[11px] font-bold text-sky-600 uppercase tracking-wider block">Incidents</span>
+                <span className="text-2xl font-black text-sky-700 mt-0.5 block">{metrics.incidents}</span>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-[11px] font-bold text-rose-600 uppercase tracking-wider block">Accidents</span>
+                <span className="text-2xl font-black text-rose-700 mt-0.5 block">{metrics.accidents}</span>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider block">Concerns</span>
+                <span className="text-2xl font-black text-emerald-700 mt-0.5 block">{metrics.concerns}</span>
+              </div>
+            </div>
+
+            {/* Main Submissions Table Card */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              {/* Category Filter Tabs */}
+              <div className="border-b border-slate-200 px-4 sm:px-6 pt-3 flex items-center justify-between gap-2 overflow-x-auto scrollbar-none">
+                <div className="flex items-center gap-1">
+                  {[
+                    { id: 'all', label: 'All Reports' },
+                    { id: 'hazard', label: 'Hazards (HAZ)' },
+                    { id: 'incident', label: 'Incidents (INC)' },
+                    { id: 'accident', label: 'Accidents (ACC)' },
+                    { id: 'concern', label: 'Concerns (SC)' }
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setSelectedCategoryTab(tab.id as any)}
+                      className={`px-4 py-2.5 text-xs sm:text-sm font-bold border-b-2 whitespace-nowrap transition-colors ${
+                        selectedCategoryTab === tab.id
+                          ? 'border-[#1B8E44] text-[#1B8E44]'
+                          : 'border-transparent text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-2 pb-2">
+                  <button
+                    onClick={() => handleExport('xlsx')}
+                    disabled={filteredReports.length === 0}
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[#1B8E44]" />
+                    <span>Export Excel</span>
+                  </button>
+                  <button
+                    onClick={() => handleExport('csv')}
+                    disabled={filteredReports.length === 0}
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
+                  >
+                    <span>CSV</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Filters row */}
+              <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50/50 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Search */}
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search ID, station, notes, flight..."
+                      className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-[#1B8E44]"
+                    />
+                  </div>
+
+                  {/* Status Filter */}
+                  <div>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="w-full py-1.5 px-3 text-xs rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-[#1B8E44] font-medium"
+                    >
+                      <option value="all">All Statuses</option>
+                      {STATUS_OPTIONS.map((s) => (
+                        <option key={s} value={s}>
+                          Status: {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Reporting Type */}
+                  <div>
+                    <select
+                      value={reportingFilter}
+                      onChange={(e) => setReportingFilter(e.target.value)}
+                      className="w-full py-1.5 px-3 text-xs rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-[#1B8E44] font-medium"
+                    >
+                      <option value="all">All Reporting Methods</option>
+                      <option value="Named">Named Reports</option>
+                      <option value="Confidential">Confidential Reports</option>
+                      <option value="Anonymous">Anonymous Reports</option>
+                    </select>
+                  </div>
+
+                  {/* Quick Toggles */}
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={urgentOnly}
+                        onChange={(e) => setUrgentOnly(e.target.checked)}
+                        className="w-4 h-4 text-rose-600 rounded border-slate-300"
+                      />
+                      <span className="font-bold text-rose-700">Urgent Only</span>
+                    </label>
+
+                    <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={hasEvidenceOnly}
+                        onChange={(e) => setHasEvidenceOnly(e.target.checked)}
+                        className="w-4 h-4 text-[#1B8E44] rounded border-slate-300"
+                      />
+                      <span>With Attachments</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Table Data */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100/80 text-slate-700 font-extrabold uppercase tracking-wider border-b border-slate-200">
+                    <tr>
+                      <th className="py-3 px-4">Report ID</th>
+                      <th className="py-3 px-4">Form</th>
+                      <th className="py-3 px-4">Type</th>
+                      <th className="py-3 px-4">Date Reported</th>
+                      <th className="py-3 px-4">Location</th>
+                      <th className="py-3 px-4">Flight / Reg</th>
+                      <th className="py-3 px-4">Urgent</th>
+                      <th className="py-3 px-4">Evidence</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 font-medium">
+                    {filteredReports.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} className="py-12 text-center text-slate-500">
+                          <FolderOpen className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                          <p className="font-bold">No safety reports match your filters</p>
+                          <p className="text-[11px] text-slate-400 mt-1">Try adjusting the search criteria or status filter.</p>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredReports.map((report) => (
+                        <tr
+                          key={report.reportId}
+                          onClick={() => setSelectedReport(report)}
+                          className={`hover:bg-emerald-50/40 cursor-pointer transition-colors ${
+                            report.urgent === 'Yes' ? 'bg-rose-50/30' : ''
+                          }`}
+                        >
+                          <td className="py-3.5 px-4 font-mono font-black text-slate-900">
+                            {report.reportId}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span className="font-mono text-[10px] font-black uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                              {report.form}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                                report.reporting === 'Anonymous'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : report.reporting === 'Confidential'
+                                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                  : 'bg-slate-100 text-slate-800'
+                              }`}
+                            >
+                              {report.reporting}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-slate-600 font-mono">
+                            {report.dateReported || '-'}
+                          </td>
+                          <td className="py-3.5 px-4 text-slate-800 max-w-[160px] truncate" title={report.location}>
+                            {report.location || '-'}
+                          </td>
+                          <td className="py-3.5 px-4 font-mono text-slate-600">
+                            {report.flightNo ? report.flightNo : report.aircraftReg || '-'}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            {report.urgent === 'Yes' ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-[#DE2010] text-white animate-pulse">
+                                Urgent
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">No</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            {report.evidenceCount && report.evidenceCount > 0 ? (
+                              <span className="inline-flex items-center gap-1 font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                                <Paperclip className="w-3 h-3 text-[#1B8E44]" />
+                                {report.evidenceCount}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">-</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span
+                              className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full ${
+                                report.status === 'Closed'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : report.status === 'Under review'
+                                  ? 'bg-sky-100 text-sky-800'
+                                  : report.status === 'Action required'
+                                  ? 'bg-amber-100 text-amber-900'
+                                  : 'bg-slate-200 text-slate-800'
+                              }`}
+                            >
+                              {report.status || 'New'}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-right">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedReport(report);
+                              }}
+                              className="px-2.5 py-1 rounded-md bg-white border border-slate-300 hover:bg-[#1B8E44] hover:text-white hover:border-[#1B8E44] text-slate-700 font-bold transition-all shadow-2xs"
+                            >
+                              Inspect
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Safety Analytics & KPIs */}
+        {activeCmsTab === 'analytics' && (
+          <div className="p-4 sm:p-6 space-y-6">
+            <div>
+              <h2 className="text-lg font-black text-slate-900">Safety Performance Indicators (SPI)</h2>
+              <p className="text-xs text-slate-500">ICAO Annex 19 safety assurance and resolution metrics</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Occurrence Categories</span>
+                <div className="space-y-2 pt-2">
+                  <div>
+                    <div className="flex justify-between text-xs font-bold mb-1">
+                      <span>Hazards</span>
+                      <span>{metrics.hazards} ({metrics.total ? Math.round((metrics.hazards / metrics.total) * 100) : 0}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-[#F37C1C] h-full"
+                        style={{ width: `${metrics.total ? (metrics.hazards / metrics.total) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-xs font-bold mb-1">
+                      <span>Incidents</span>
+                      <span>{metrics.incidents} ({metrics.total ? Math.round((metrics.incidents / metrics.total) * 100) : 0}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-[#0284c7] h-full"
+                        style={{ width: `${metrics.total ? (metrics.incidents / metrics.total) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-xs font-bold mb-1">
+                      <span>Accidents</span>
+                      <span>{metrics.accidents} ({metrics.total ? Math.round((metrics.accidents / metrics.total) * 100) : 0}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-[#DE2010] h-full"
+                        style={{ width: `${metrics.total ? (metrics.accidents / metrics.total) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-xs font-bold mb-1">
+                      <span>Safety Concerns</span>
+                      <span>{metrics.concerns} ({metrics.total ? Math.round((metrics.concerns / metrics.total) * 100) : 0}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-[#1B8E44] h-full"
+                        style={{ width: `${metrics.total ? (metrics.concerns / metrics.total) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Investigation Resolution</span>
+                <div className="text-3xl font-black text-slate-900">
+                  {metrics.total ? Math.round((metrics.closed / metrics.total) * 100) : 100}%
+                </div>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Percentage of logged reports resolved and marked as Closed following QSA risk assessment.
+                </p>
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-semibold text-emerald-900">
+                  Active Under Review: <strong>{metrics.underReview}</strong>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Reporting Trust Indicator</span>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span>Anonymous Reports</span>
+                    <span>{reports.filter((r) => r.reporting === 'Anonymous').length}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span>Confidential Reports</span>
+                    <span>{reports.filter((r) => r.reporting === 'Confidential').length}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span>Named Reports</span>
+                    <span>{reports.filter((r) => r.reporting === 'Named').length}</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Demonstrates active engagement with Zambia Airways Just Culture policy.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: SharePoint & Excel Integration */}
+        {activeCmsTab === 'sync' && (
+          <div className="p-4 sm:p-6 space-y-6 max-w-4xl">
+            <div>
+              <h2 className="text-lg font-black text-slate-900">Microsoft 365 & SharePoint Reconciliation</h2>
+              <p className="text-xs text-slate-500">
+                Bi-directional sync engine between master Firestore safety documents and corporate Microsoft Excel Online.
+              </p>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-[#1B8E44] shrink-0">
+                  <FileSpreadsheet className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Live Excel & SharePoint Table Synchronization
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    Safety submissions are automatically dispatched to Power Automate upon submission. If any rows or attachment links in Excel were accidentally altered or removed, this CMS tool queries Microsoft Graph to restore missing records from the Firestore master.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs text-slate-700">
+                <div className="font-bold text-slate-900">Sync Capabilities:</div>
+                <ul className="list-disc list-inside space-y-1 text-slate-600">
+                  <li>Detects missing rows by Report ID in Excel Online tables</li>
+                  <li>Re-mirrors sanitized evidence files to SharePoint evidence folders</li>
+                  <li>Generates dry-run previews before writing modifications</li>
+                </ul>
+              </div>
+
+              <button
+                onClick={() => setIsSyncModalOpen(true)}
+                className="px-6 py-3 rounded-xl bg-[#1B8E44] hover:bg-[#147236] text-white font-extrabold text-xs sm:text-sm shadow-md transition-colors flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4 text-[#F37C1C]" />
+                <span>Launch Reconciliation Console</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 5: CMS Configuration */}
+        {activeCmsTab === 'settings' && (
+          <div className="p-4 sm:p-6 space-y-6 max-w-4xl">
+            <div>
+              <h2 className="text-lg font-black text-slate-900">QSA CMS System Settings</h2>
+              <p className="text-xs text-slate-500">System configuration, regulatory parameters, and compliance details</p>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-6 space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Airline Operator</span>
+                  <div className="font-extrabold text-slate-900">Zambia Airways (2014) Limited</div>
+                  <div className="text-slate-500">IATA: Z9 • ICAO: AZB</div>
+                </div>
+
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Regulatory Standard</span>
+                  <div className="font-extrabold text-slate-900">ZCAA Safety Management System</div>
+                  <div className="text-slate-500">ICAO Annex 19 Safety Framework</div>
+                </div>
+
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Emergency Safety Desk</span>
+                  <div className="font-extrabold text-slate-900">KKIA Airport Operations</div>
+                  <div className="text-slate-500">Ext. 2100 / Duty Safety Desk</div>
+                </div>
+
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">CMS System Architecture</span>
+                  <div className="font-extrabold text-slate-900">Independent Multi-Portal Routing</div>
+                  <div className="text-slate-500">Firebase Firestore Spark Tier (Atomic WriteBatch)</div>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-100 pt-4 text-xs text-slate-500">
+                Access to this CMS is strictly verified against the Firestore <code>admins</code> collection for officer operations and <code>qsaAdmins</code> for confidential identity disclosure.
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Detail Inspection Drawer */}
+      <DetailDrawer
+        report={selectedReport}
+        onClose={() => setSelectedReport(null)}
+        onReportUpdated={() => {
+          loadReports();
+          if (selectedReport) {
+            const updated = reports.find((r) => r.reportId === selectedReport.reportId);
+            if (updated) setSelectedReport(updated);
+          }
+        }}
+        isQsaAdmin={isQsaAdmin}
+      />
+
+      {/* Sync to Excel Modal */}
+      <SyncModal
+        isOpen={isSyncModalOpen}
+        onClose={() => {
+          setIsSyncModalOpen(false);
+          loadReports();
+        }}
+      />
+    </div>
+  );
+};

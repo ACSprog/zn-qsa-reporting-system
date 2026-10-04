@@ -1,0 +1,6 @@
+{
+  "name": "Zambia Airways Safety Reporting System",
+  "description": "Official safety reporting system for Zambia Airways (2014) Limited to report hazards, incidents, accidents, and safety concerns.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
