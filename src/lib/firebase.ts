@@ -18,12 +18,9 @@ import {
 import {
   getAuth,
   Auth,
-  signInWithPopup,
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
   signOut as fbSignOut,
-  OAuthProvider,
-  GoogleAuthProvider,
   onAuthStateChanged,
   User
 } from 'firebase/auth';
@@ -464,25 +461,6 @@ export async function sendResetPasswordEmail(
   } else {
     return { success: true };
   }
-}
-
-export async function signInWithMicrosoft(): Promise<User | null> {
-  if (auth) {
-    const provider = new OAuthProvider('microsoft.com');
-    provider.addScope('User.Read');
-    const result = await signInWithPopup(auth, provider);
-    return result.user;
-  }
-  return null;
-}
-
-export async function signInWithGoogle(): Promise<User | null> {
-  if (auth) {
-    const provider = new GoogleAuthProvider();
-    const result = await signInWithPopup(auth, provider);
-    return result.user;
-  }
-  return null;
 }
 
 export async function signOutUser(): Promise<void> {
