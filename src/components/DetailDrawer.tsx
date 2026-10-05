@@ -18,7 +18,8 @@ import {
   ExternalLink,
   Loader2,
   Save,
-  Eye
+  Eye,
+  RefreshCw
 } from 'lucide-react';
 import {
   BaseReportData,
@@ -34,6 +35,7 @@ import {
   updateReportMetadata
 } from '../lib/firebase';
 import { triggerFileDownload } from '../lib/evidence';
+import { restoreReportToExcel } from '../lib/restoreToExcel';
 
 interface DetailDrawerProps {
   report: BaseReportData | null;
@@ -62,12 +64,16 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
 
   const [previewImage, setPreviewImage] = useState<ProcessedEvidenceFile | null>(null);
 
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
   useEffect(() => {
     if (!report) return;
 
     setCurrentStatus(report.status || 'New');
     setCurrentNotes(report.notes || '');
     setSaveSuccess(false);
+    setSyncMessage(null);
 
     // 1. Load evidence subcollection on drawer open ONLY (per spec)
     if (report.evidenceCount > 0) {
@@ -121,6 +127,21 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
       }
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSyncToExcel = async () => {
+    const confirmed = window.confirm(
+      `Re-send ${report.reportId} to Excel and SharePoint?\n\nIf the Excel row already exists, nothing is duplicated. No email is sent.`
+    );
+    if (!confirmed) return;
+    setIsSyncing(true);
+    setSyncMessage(null);
+    try {
+      const result = await restoreReportToExcel(report);
+      setSyncMessage(result.message);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -449,6 +470,27 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
               )}
             </div>
           </div>
+        </div>
+
+        {/* Sync to Excel */}
+        <div className="px-4 py-3 border-t border-slate-200 bg-white shrink-0 flex items-center justify-between gap-3">
+          <p className="text-[11px] text-slate-500 leading-snug">
+            {syncMessage ??
+              'Re-send this report to Excel and SharePoint if its row or files were deleted. No email is sent.'}
+          </p>
+          <button
+            type="button"
+            onClick={handleSyncToExcel}
+            disabled={isSyncing}
+            className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded border border-emerald-600 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+          >
+            {isSyncing ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="w-3.5 h-3.5" />
+            )}
+            <span>Sync to Excel</span>
+          </button>
         </div>
 
         {/* Drawer Footer Actions */}

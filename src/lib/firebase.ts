@@ -156,8 +156,15 @@ export async function submitSafetyReport(
     } catch (err: any) {
       return { success: false, reportId, error: err?.message || 'Database write error' };
     }
+  } else if (import.meta.env.PROD) {
+    // Production build without Firebase config: fail loudly instead of pretending to save
+    return {
+      success: false,
+      reportId,
+      error: 'The reporting database is not configured. Please contact QSA.'
+    };
   } else {
-    // In-memory fallback
+    // In-memory fallback (local development only)
     const timestamp = new Date();
     inMemoryStore.reports.set(reportId, {
       ...reportDocData,
@@ -181,36 +188,47 @@ export async function submitSafetyReport(
 }
 
 /**
- * Power Automate dispatch per Section 1 & Section 11
+ * Power Automate dispatch per Section 1 & Section 11.
+ * Returns false when no flow URL is configured for the form.
+ * `restore = true` is used by "Sync to Excel": the flow skips the email and
+ * will not duplicate an existing Excel row.
  */
-function dispatchPowerAutomateFlow(
+export function dispatchPowerAutomateFlow(
   form: FormType,
   reportId: string,
   data: Record<string, any>,
   category: string,
   evidenceCount: number,
   evidenceFolder: string,
-  evidenceFiles: ProcessedEvidenceFile[]
-) {
+  evidenceFiles: ProcessedEvidenceFile[],
+  restore: boolean = false
+): boolean {
   const envKey = `VITE_FLOW_URL_${form.toUpperCase()}`;
   const flowUrl = (import.meta.env as any)[envKey];
   const token = import.meta.env.VITE_FLOW_TOKEN || '';
 
   if (!flowUrl) {
-    return; // No endpoint configured
+    return false; // No endpoint configured
   }
 
+  const isAnonymous = data.reporting === 'Anonymous';
+
   const payload = {
+    // Spread FIRST so the explicit keys below always win. The form's own text
+    // field is called `evidence`; the files array is deliberately named
+    // `evidenceFiles` so the two can never overwrite each other.
+    ...data,
     token,
     form,
     reportId,
-    dateReported: new Date().toISOString().split('T')[0],
+    restore,
+    dateReported: data.dateReported || new Date().toISOString().split('T')[0],
     category,
     reporting: data.reporting,
-    name: data.reporting === 'Anonymous' ? '' : data.name || '',
-    department: data.reporting === 'Anonymous' ? '' : data.department || '',
-    position: data.reporting === 'Anonymous' ? '' : data.position || '',
-    contact: data.reporting === 'Anonymous' ? '' : data.contact || '',
+    name: isAnonymous ? '' : data.name || '',
+    department: isAnonymous ? '' : data.department || '',
+    position: isAnonymous ? '' : data.position || '',
+    contact: isAnonymous ? '' : data.contact || '',
     eventDate: data.eventDate || '',
     eventTime: data.eventTime || '',
     location: data.location || '',
@@ -223,13 +241,12 @@ function dispatchPowerAutomateFlow(
     notifiedWho: data.notifiedWho || '',
     evidenceCount,
     evidenceFolder,
-    evidence: evidenceFiles.map((f) => ({
+    evidenceFiles: evidenceFiles.map((f) => ({
       name: f.name,
       contentType: f.contentType,
       size: f.size,
       base64: f.base64
-    })),
-    ...data
+    }))
   };
 
   fetch(flowUrl, {
@@ -240,6 +257,8 @@ function dispatchPowerAutomateFlow(
   }).catch(() => {
     // Non-blocking fire and forget as mandated in spec
   });
+
+  return true;
 }
 
 /**
@@ -375,8 +394,11 @@ export async function verifyUserRoles(user: User | { uid: string; email?: string
     } catch {
       return { isAdmin: false, isQsaAdmin: false };
     }
+  } else if (import.meta.env.PROD) {
+    // Production build without Firebase config: nobody is an admin
+    return { isAdmin: false, isQsaAdmin: false };
   } else {
-    // In-memory or preview role resolution
+    // In-memory or preview role resolution (local development only)
     const isMockAdmin = inMemoryStore.admins.has(user.uid) || (user.email ? inMemoryStore.admins.has(user.email) : false);
     const isMockQsa = inMemoryStore.qsaAdmins.has(user.uid) || (user.email ? inMemoryStore.qsaAdmins.has(user.email) : false);
     return {

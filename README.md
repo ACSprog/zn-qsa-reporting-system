@@ -2,7 +2,7 @@
 
 Official Safety Management System (SMS) web application for **Zambia Airways (2014) Limited** to report hazards, operational incidents, accidents, and safety concerns in compliance with ZCAA (Zambia Civil Aviation Authority) regulations and ICAO Annex 19.
 
-Built with **React + TypeScript + Vite + Tailwind CSS**, integrating with **Firebase Firestore & Authentication (Spark Plan)**, **Microsoft 365 / Power Automate**, and **Microsoft Graph (Excel Online & SharePoint)**.
+Built with **React + TypeScript + Vite + Tailwind CSS**, integrating with **Firebase Firestore & Authentication (Spark Plan)**, and **Microsoft 365 / Power Automate** (Excel Online & SharePoint).
 
 ---
 
@@ -15,13 +15,13 @@ Built with **React + TypeScript + Vite + Tailwind CSS**, integrating with **Fire
     - Incident Form: `/incident`
     - Accident Form: `/accident`
     - Safety Concern Form: `/concern`
-  - **QSA Owner Portal (`/admin`):** Fully isolated administrative portal accessed strictly by authenticated safety managers and inspectors for investigation, risk assessment, archive management, and Microsoft Graph synchronization.
+  - **QSA Owner Portal (`/admin`):** Fully isolated administrative portal accessed strictly by authenticated safety managers and inspectors for investigation, risk assessment, archive management, and Excel/SharePoint re-sync through Power Automate.
 - **Firebase Spark Plan Compliance:** No Firebase Cloud Functions and no Firebase Cloud Storage (`firebase/storage`, buckets). Evidence attachments are processed client-side, stored as sanitized base64 chunks (<600 KB) in a Firestore subcollection, and mirrored into SharePoint Online via Power Automate HTTP webhooks.
 - **Client-Side Sanitization:** Images are decoded, normalized for rotation, stripped of all EXIF/GPS/device metadata via canvas redraw, resized to ≤1600 px, iteratively compressed to ≤600 KB, and assigned sequential neutral names (`evidence-1.jpg`, `evidence-2.jpg`).
 - **Anonymity Protections:** Anonymous reports strictly suppress and clear the four reporter identity fields (`name`, `department`, `position`, `contact`) both in the UI and payload. PDF attachments are disabled for anonymous reports to prevent author metadata leakage. No IP addresses or device fingerprints are recorded.
 - **Master Firestore Transaction:** All report submissions execute as an atomic `writeBatch` in Firestore.
 - **Non-blocking Power Automate Dispatch:** Submissions POST payload JSON to Power Automate with `mode: 'no-cors'` without blocking user confirmation.
-- **Bi-directional Reconciliation:** Built-in **Sync to Excel** using MSAL and Microsoft Graph allows safety managers to restore deleted rows and evidence files to Excel and SharePoint from the Firestore master.
+- **Bi-directional Reconciliation:** Built-in **Sync to Excel** (through the same Power Automate flow) allows safety managers to restore deleted rows and evidence files to Excel and SharePoint from the Firestore master.
 
 ---
 
@@ -75,25 +75,15 @@ firebase deploy --only hosting,firestore:rules
 
 ---
 
-## 4. Microsoft Entra ID (Azure AD) App Registration
+## 4. Sync to Excel (through Power Automate)
 
-To enable the **Sync to Excel** feature using MSAL and Microsoft Graph:
+**Sync to Excel** needs no Microsoft app registration. The dashboard re-sends one report to the same Power Automate flow with `restore: true`, and the flow restores the Excel row and SharePoint files using its own connections.
 
-1. Open the [Microsoft Entra Admin Center](https://entra.microsoft.com/).
-2. Navigate to **Identity** -> **Applications** -> **App registrations** -> **New registration**.
-   - **Name:** `Zambia Airways Safety Sync`
-   - **Supported account types:** Accounts in this organizational directory only (Single tenant) or Multitenant.
-   - **Redirect URI:** Select **Single-page application (SPA)** and add:
-     - `http://localhost:3000`
-     - `http://localhost:5173`
-     - `https://{your-firebase-project}.web.app`
-3. Under **API permissions**, add Microsoft Graph **Delegated permissions**:
-   - `User.Read`
-   - `Files.ReadWrite.All` (required to read/append rows to the Excel workbook and upload evidence to SharePoint)
-4. Click **Grant admin consent for Zambia Airways (2014) Limited**.
-5. Copy the **Application (client) ID** and **Directory (tenant) ID** into your `.env.local` file:
-   - `VITE_MSAL_CLIENT_ID`
-   - `VITE_MSAL_TENANT_ID`
+1. Open `/admin`, open the report, and click **Sync to Excel** at the bottom of the details panel.
+2. The app cannot read the flow's reply, so it can only confirm that the report was sent. Check the workbook after a minute.
+3. If the Excel row already exists, nothing is duplicated. No notification email is sent.
+
+The flow must implement the `restore` handling described in `docs/POWER_AUTOMATE.md`.
 
 ---
 
@@ -123,5 +113,6 @@ Use this checklist to verify production readiness:
   - Check notification email delivery to the routed safety recipient.
 - [ ] **Reconciliation & Sync to Excel:**
   - Delete a test row from Excel and remove the SharePoint evidence folder.
-  - Open `/admin`, click **Sync to Excel**, run **Preview** to verify the dry-run summary.
-  - Click **Sync to Excel**: verify that the row and missing evidence files are restored without triggering new email notifications.
+  - Open `/admin`, open that report, and click **Sync to Excel**.
+  - Wait a minute: verify the row and the evidence files are restored, with no new email notification.
+  - Click **Sync to Excel** again: verify nothing is duplicated.

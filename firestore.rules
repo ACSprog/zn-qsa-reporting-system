@@ -14,6 +14,10 @@ service cloud.firestore {
       return isSignedIn() && exists(/databases/$(database)/documents/qsaAdmins/$(request.auth.uid));
     }
 
+    function isReportForm(form) {
+      return form in ['hazard', 'incident', 'accident', 'concern'];
+    }
+
     // Admins metadata collection
     match /admins/{uid} {
       allow read: if isSignedIn() && request.auth.uid == uid;
@@ -26,32 +30,39 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Report collections
+    // Report collections (hazard, incident, accident, concern ONLY)
     match /{form}/{reportId} {
-      allow create: if form in ['hazard', 'incident', 'accident', 'concern']
+      allow create: if isReportForm(form)
         && request.resource.data.reporting in ['Named', 'Confidential', 'Anonymous']
         && request.resource.data.status == 'New'
         && request.resource.data.deleted == false
         && request.resource.data.evidenceCount is number
         && request.resource.data.evidenceCount >= 0
         && request.resource.data.evidenceCount <= 5
-        && request.resource.data.reportId == reportId;
+        && request.resource.data.reportId == reportId
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.keys().size() <= 60
+        // identity fields must never be stored on the report document
+        && !request.resource.data.keys().hasAny(['name', 'department', 'position', 'contact']);
 
-      allow read: if isAdmin();
+      allow read: if isAdmin() && isReportForm(form);
 
       allow update: if isAdmin()
+        && isReportForm(form)
+        && request.resource.data.status in ['New', 'Under review', 'Action required', 'Closed']
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'notes', 'deleted']);
 
       allow delete: if false;
 
       // Evidence subcollection (1 to 5 files per report)
       match /evidence/{n} {
-        allow create: if form in ['hazard', 'incident', 'accident', 'concern']
+        allow create: if isReportForm(form)
           && n in ['1', '2', '3', '4', '5']
           && request.resource.data.keys().hasOnly(['name', 'contentType', 'size', 'data', 'order', 'createdAt'])
           && request.resource.data.contentType in ['image/jpeg', 'application/pdf']
           && request.resource.data.data is string
-          && request.resource.data.data.size() < 850000;
+          && request.resource.data.data.size() < 850000
+          && request.resource.data.createdAt == request.time;
         allow read: if isAdmin();
         allow update, delete: if false;
       }
@@ -60,7 +71,14 @@ service cloud.firestore {
     // Reporter identities collection (isolated from report documents)
     match /identities/{reportId} {
       allow create: if !exists(/databases/$(database)/documents/identities/$(reportId))
-        && request.resource.data.keys().hasOnly(['name', 'department', 'position', 'contact', 'createdAt', 'reporting', 'reportId']);
+        && request.resource.data.keys().hasOnly(['name', 'department', 'position', 'contact', 'createdAt', 'reporting', 'reportId'])
+        && request.resource.data.reporting in ['Named', 'Confidential']
+        && request.resource.data.reportId == reportId
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.name is string && request.resource.data.name.size() <= 300
+        && request.resource.data.department is string && request.resource.data.department.size() <= 300
+        && request.resource.data.position is string && request.resource.data.position.size() <= 300
+        && request.resource.data.contact is string && request.resource.data.contact.size() <= 300;
       allow read: if isQsaAdmin();
       allow update, delete: if false;
     }

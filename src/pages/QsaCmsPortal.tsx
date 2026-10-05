@@ -47,7 +47,6 @@ import {
   isFirebaseConfigured
 } from '../lib/firebase';
 import { DetailDrawer } from '../components/DetailDrawer';
-import { SyncModal } from '../components/SyncModal';
 import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
 
 type CmsTab = 'inbox' | 'analytics' | 'sync' | 'settings';
@@ -84,8 +83,6 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
   const [endDate, setEndDate] = useState<string>('');
   const [showArchived, setShowArchived] = useState<boolean>(false);
 
-  // Sync Modal state
-  const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
 
   // Email & Password Sign-in state
   const [loginEmail, setLoginEmail] = useState<string>(() => {
@@ -409,7 +406,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
               </div>
             )}
 
-            {/* Quick Demo Credentials Assistant */}
+            {import.meta.env.DEV && (
             <div className="bg-emerald-50/90 border border-emerald-200 rounded-xl p-3.5 text-left shadow-2xs">
               <div className="flex items-center justify-between text-xs mb-1.5">
                 <span className="font-extrabold text-emerald-950 flex items-center gap-1.5">
@@ -433,6 +430,8 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
                 <div>Password: <strong className="text-slate-900 font-bold">safety2026</strong></div>
               </div>
             </div>
+
+            )}
 
             {/* Email & Password Authentication Form */}
             <form onSubmit={handleEmailPasswordSignIn} className="space-y-4 text-left pt-1">
@@ -1128,47 +1127,39 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
           </div>
         )}
 
-        {/* Tab 3: SharePoint & Excel Integration */}
+        {/* Tab 3: Excel & SharePoint Sync */}
         {activeCmsTab === 'sync' && (
           <div className="p-4 sm:p-6 space-y-6 max-w-4xl">
             <div>
-              <h2 className="text-lg font-black text-slate-900">Microsoft 365 & SharePoint Reconciliation</h2>
+              <h2 className="text-lg font-black text-slate-900">Excel & SharePoint Sync</h2>
               <p className="text-xs text-slate-500">
-                Bi-directional sync engine between master Firestore safety documents and corporate Microsoft Excel Online.
+                Restore a report to Excel and SharePoint from the Firestore master record.
               </p>
             </div>
 
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
               <div className="flex items-start gap-4">
                 <div className="w-12 h-12 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-[#1B8E44] shrink-0">
                   <FileSpreadsheet className="w-6 h-6" />
                 </div>
-                <div>
-                  <h3 className="text-base font-extrabold text-slate-900">
-                    Live Excel & SharePoint Table Synchronization
-                  </h3>
-                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                    Safety submissions are automatically dispatched to Power Automate upon submission. If any rows or attachment links in Excel were accidentally altered or removed, this CMS tool queries Microsoft Graph to restore missing records from the Firestore master.
+                <div className="text-xs text-slate-600 leading-relaxed space-y-3">
+                  <p>
+                    Every submission is sent to Power Automate automatically. If a report&apos;s Excel row or
+                    SharePoint evidence was deleted, re-send it from here:
+                  </p>
+                  <ol className="list-decimal list-inside space-y-1">
+                    <li>Open the report from the Inbox.</li>
+                    <li>
+                      Click <strong>Sync to Excel</strong> at the bottom of the details panel.
+                    </li>
+                    <li>Wait a minute, then check the Excel workbook and the SharePoint evidence folder.</li>
+                  </ol>
+                  <p>
+                    If the Excel row already exists, nothing is duplicated. No notification email is sent. This
+                    page cannot confirm the result, because the browser cannot read the flow&apos;s reply.
                   </p>
                 </div>
               </div>
-
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs text-slate-700">
-                <div className="font-bold text-slate-900">Sync Capabilities:</div>
-                <ul className="list-disc list-inside space-y-1 text-slate-600">
-                  <li>Detects missing rows by Report ID in Excel Online tables</li>
-                  <li>Re-mirrors sanitized evidence files to SharePoint evidence folders</li>
-                  <li>Generates dry-run previews before writing modifications</li>
-                </ul>
-              </div>
-
-              <button
-                onClick={() => setIsSyncModalOpen(true)}
-                className="px-6 py-3 rounded-xl bg-[#1B8E44] hover:bg-[#147236] text-white font-extrabold text-xs sm:text-sm shadow-md transition-colors flex items-center gap-2"
-              >
-                <RefreshCw className="w-4 h-4 text-[#F37C1C]" />
-                <span>Launch Reconciliation Console</span>
-              </button>
             </div>
           </div>
         )}
@@ -1230,14 +1221,6 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
         isQsaAdmin={isQsaAdmin}
       />
 
-      {/* Sync to Excel Modal */}
-      <SyncModal
-        isOpen={isSyncModalOpen}
-        onClose={() => {
-          setIsSyncModalOpen(false);
-          loadReports();
-        }}
-      />
     </div>
   );
 };

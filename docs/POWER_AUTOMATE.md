@@ -94,6 +94,7 @@ You can build either a single flow that switches on `triggerBody()?['form']` or 
     "exposedToRisk": { "type": "string" },
     "notified": { "type": "string" },
     "notifiedWho": { "type": "string" },
+    "restore": { "type": "boolean" },
     "evidenceCount": { "type": "integer" },
     "evidenceFolder": { "type": "string" },
     "evidence": {
@@ -133,8 +134,14 @@ Add an **Excel Online (Business) — Get rows** action:
 - **Filter Query:** `Report ID eq '@{triggerBody()?['reportId']}'`
 - **Top Count:** `1`
 
-Add a **Condition**: `length(body('Get_rows')?['value'])` is greater than 0.
-- If **Yes**: Add **Terminate** (Status: Succeeded) — prevents duplicate processing.
+Add an **Initialize variable** action named `rowExists` (Boolean) with the value:
+`greater(length(body('Get_rows')?['value']), 0)`
+
+Add a **Condition** (duplicate guard) using **And**:
+- `rowExists` is equal to `true`
+- `equals(triggerBody()?['restore'], true)` is equal to `false`
+
+If **Yes**: Add **Terminate** (Status: Succeeded). This prevents duplicate processing for normal submissions. When `restore` is `true` (Sync to Excel in the dashboard), the flow continues instead.
 
 ### Step 5: Save Evidence to SharePoint
 Add a **Condition**:
@@ -148,8 +155,11 @@ If **Yes**:
   - **Folder Path:** `/Shared Documents/Safety Evidence/@{triggerBody()?['reportId']}`
   - **File Name:** `items('Apply_to_each')?['name']`
   - **File Content:** Expression: `base64ToBinary(items('Apply_to_each')?['base64'])`
+  - **When restoring:** if a file already exists in the folder, Create file returns a conflict error. Configure the actions after the loop (Step 6 onward) to run after **is successful** and **has failed**, so a "file already exists" error does not stop the flow. Test this with a report whose evidence is already in SharePoint.
 
 ### Step 6: Add Row into Excel Table
+Put this step inside a **Condition**: `rowExists` is equal to `false`. (When restoring a report whose row still exists, skip it.)
+
 Add **Excel Online (Business) — Add a row into a table**:
 Map the columns to the trigger body properties:
 - `Report ID`: `triggerBody()?['reportId']`
@@ -164,6 +174,7 @@ Map the columns to the trigger body properties:
 - `Evidence Folder`: `triggerBody()?['evidenceFolder']`
 
 ### Step 7: Lookup Recipient in tblRouting
+> Put Steps 7 and 8 inside a **Condition**: `equals(triggerBody()?['restore'], true)` is equal to `false`. When restoring, skip both so no email is sent.
 Add **Excel Online (Business) — List rows present in a table** for `tblRouting`.
 - Filter or use **Filter array** to find matching row where `Form eq '@{triggerBody()?['form']}'` and `Category eq '@{triggerBody()?['category']}'`.
 - If no category match, fallback to `Category eq ''`.
