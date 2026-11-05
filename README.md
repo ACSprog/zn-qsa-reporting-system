@@ -77,6 +77,14 @@ Keep your online (development) Firebase project's `VITE_FIREBASE_*` values in `.
 
 The dashboard badge shows which one you are on ("Online Firestore Connected" or "Local emulators"). The two keep separate data and separate logins.
 
+### One-Command Setup of an Online Firebase Project
+After creating a Firebase project and registering a Web app in the console (and putting its `VITE_FIREBASE_*` values in `.env.local`):
+```bash
+firebase login:use you@gmail.com        # the Google account that owns the project
+npm run setup:firebase -- --email admin@example.com --password YourPassword
+```
+This creates the Firestore database (default location `africa-south1`, change with `--location`), publishes `firestore.rules`, turns on Email/Password sign-in, creates the admin login and adds it to `admins` and `qsaAdmins`. It shows the account and project and asks before changing anything, and is safe to re-run. Works on the free Spark plan. Options: `--project <id>`, `--account <email>`, `--location <loc>`, `--yes`.
+
 ### Production Build & Firebase Deployment
 ```bash
 # Build production bundle
