@@ -208,3 +208,64 @@ Add a second **Scope** named `Catch_Failure` configured with **Configure run aft
 ## 4. Size & Limit Best Practices
 - Client-side image compression already ensures files do not exceed 600 KB each (max 5 files = ~3-4 MB payload).
 - This stays comfortably within Power Automate's 100 MB request limit and SharePoint 250 MB single-file upload limit.
+
+---
+
+## 5. Account Welcome Email Flow (new CMS users)
+
+When a Manager adds a user under **CMS → User Accounts**, the app creates the login with a temporary password and POSTs the details to a second flow, which emails the new user from the company mailbox. The user must change the temporary password the first time they sign in.
+
+If `VITE_FLOW_URL_ACCOUNTS` is empty, the app falls back to Firebase's own "set your password" email, and the Manager sees the temporary password on screen.
+
+### Step 1: Trigger: When an HTTP request is received
+- **Who can trigger the flow:** `Anyone`
+- **Request Body JSON Schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "token": { "type": "string" },
+    "type": { "type": "string" },
+    "email": { "type": "string" },
+    "name": { "type": "string" },
+    "role": { "type": "string" },
+    "roleLabel": { "type": "string" },
+    "roleDescription": { "type": "string" },
+    "tempPassword": { "type": "string" },
+    "loginUrl": { "type": "string" },
+    "invitedBy": { "type": "string" }
+  }
+}
+```
+- Copy the generated **HTTP URL** into `VITE_FLOW_URL_ACCOUNTS` (same `VITE_FLOW_TOKEN` as the report flows), then rebuild and redeploy the site.
+
+### Step 2: Safety checks (Condition) — required
+The token is visible to anyone who inspects the website code, so the flow itself must make sure it can only send this one kind of email to staff. Add a **Condition** with **all** of these, and **Terminate** (Status: Cancelled) if any is false:
+- `triggerBody()?['token']` **is equal to** your secret token
+- `triggerBody()?['type']` **is equal to** `account-invite`
+- `toLower(triggerBody()?['email'])` **ends with** `@zambiaairways.co.zm`
+- `length(triggerBody()?['tempPassword'])` **is less than or equal to** `20`
+
+### Step 3: Respond (optional)
+**Response** action, Status Code `202`. The browser does not read it (no-cors), so this only keeps the run tidy.
+
+### Step 4: Send an email (V2) (Office 365 Outlook)
+Send from the QSA shared mailbox if you have one (**Send an email from a shared mailbox (V2)**).
+- **To:** `triggerBody()?['email']`
+- **Subject:** `Your Zambia Airways QSA CMS login`
+- **Importance:** Normal
+- **Body** (HTML). Type the login address yourself rather than using `loginUrl` from the request, so the email can never point anywhere else:
+```html
+<p>Dear @{coalesce(triggerBody()?['name'], 'colleague')},</p>
+<p>An account has been created for you on the Zambia Airways QSA Safety Reporting CMS.</p>
+<p><b>Access level:</b> @{triggerBody()?['roleLabel']}. @{triggerBody()?['roleDescription']}</p>
+<p><b>Sign in at:</b> <a href="https://YOUR-LIVE-SITE/admin">https://YOUR-LIVE-SITE/admin</a><br/>
+<b>Email:</b> @{triggerBody()?['email']}<br/>
+<b>Temporary password:</b> @{triggerBody()?['tempPassword']}</p>
+<p>You will be asked to choose your own password the first time you sign in. Do not share this email.</p>
+<p>If you were not expecting this, contact the QSA department.</p>
+```
+- For an existing login (Manager used "Existing login UID"), `tempPassword` is empty. Add a Condition on `empty(triggerBody()?['tempPassword'])` and, if true, send the same email without the password line ("use your existing password").
+
+### Step 5: Run history hygiene
+Flow run history stores the temporary password. In the trigger's **Settings**, turn on **Secure Inputs** (and **Secure Outputs** on the email action) so it is hidden from run history.

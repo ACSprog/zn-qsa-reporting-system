@@ -32,7 +32,9 @@ import {
   FormType,
   ProcessedEvidenceFile,
   ReporterIdentity,
-  ReportStatus
+  ReportStatus,
+  CmsRole,
+  DeletionRequest
 } from '../types';
 import { stripIdentityIfAnonymous, getCategoryForForm } from './idGenerator';
 
@@ -479,7 +481,7 @@ export function subscribeToAllReports(
 export async function updateReportMetadata(
   form: FormType,
   reportId: string,
-  updates: { status?: ReportStatus; notes?: string; deleted?: boolean }
+  updates: { status?: ReportStatus; notes?: string; deleted?: boolean; deletionRequest?: DeletionRequest }
 ): Promise<boolean> {
   if (db) {
     try {
@@ -558,35 +560,83 @@ export async function fetchReportEvidence(
 /**
  * Role Check helper
  */
-export async function verifyUserRoles(user: User | { uid: string; email?: string | null }): Promise<{
+export interface UserRoles {
   isAdmin: boolean;
+  /** Manager: can see reporter identities (kept for existing callers) */
   isQsaAdmin: boolean;
-}> {
-  if (!user) return { isAdmin: false, isQsaAdmin: false };
+  role: CmsRole | null;
+  mustChangePassword: boolean;
+}
+
+/** Preview mode only: sign in as viewer@..., officer@... to try the lower levels */
+function previewRoleFor(email?: string | null): CmsRole {
+  const e = (email || '').toLowerCase();
+  if (e.startsWith('viewer')) return 'viewer';
+  if (e.startsWith('officer')) return 'officer';
+  return 'manager';
+}
+
+export async function verifyUserRoles(user: User | { uid: string; email?: string | null }): Promise<UserRoles> {
+  const none: UserRoles = { isAdmin: false, isQsaAdmin: false, role: null, mustChangePassword: false };
+  if (!user) return none;
 
   if (db) {
     try {
       const adminDoc = await getDoc(doc(db, 'admins', user.uid));
+      if (!adminDoc.exists()) return none;
       const qsaDoc = await getDoc(doc(db, 'qsaAdmins', user.uid));
-      return {
-        isAdmin: adminDoc.exists(),
-        isQsaAdmin: qsaDoc.exists()
-      };
+      const data = adminDoc.data() || {};
+      // Legacy qsaAdmins members are Managers; docs without a role are Officers
+      const stored = data.role as CmsRole | undefined;
+      const role: CmsRole = qsaDoc.exists() ? 'manager' : stored && ['viewer', 'officer', 'manager'].includes(stored) ? stored : 'officer';
+      return { isAdmin: true, isQsaAdmin: role === 'manager', role, mustChangePassword: data.mustChangePassword === true };
     } catch {
-      return { isAdmin: false, isQsaAdmin: false };
+      return none;
     }
   } else if (import.meta.env.PROD) {
     // Production build without Firebase config: nobody is an admin
-    return { isAdmin: false, isQsaAdmin: false };
+    return none;
   } else {
-    // In-memory or preview role resolution (local development only)
-    const isMockAdmin = inMemoryStore.admins.has(user.uid) || (user.email ? inMemoryStore.admins.has(user.email) : false);
-    const isMockQsa = inMemoryStore.qsaAdmins.has(user.uid) || (user.email ? inMemoryStore.qsaAdmins.has(user.email) : false);
-    return {
-      isAdmin: isMockAdmin || true, // Allow review in mock preview
-      isQsaAdmin: isMockQsa || true
-    };
+    const role = previewRoleFor(user.email);
+    return { isAdmin: true, isQsaAdmin: role === 'manager', role, mustChangePassword: false };
   }
+}
+
+/** Officer: ask a Manager to delete (archive) a report. */
+export async function requestReportDeletion(
+  report: BaseReportData,
+  reason: string,
+  requester: { uid: string; email?: string | null }
+): Promise<{ ok: boolean; error?: string }> {
+  const trimmed = reason.trim();
+  if (!trimmed) return { ok: false, error: 'Please give a reason for the deletion request.' };
+  const request: DeletionRequest = {
+    status: 'pending',
+    requestedBy: requester.uid,
+    requestedByEmail: requester.email || '',
+    requestedAt: db ? serverTimestamp() : new Date().toISOString(),
+    reason: trimmed.slice(0, 1000)
+  };
+  const ok = await updateReportMetadata(report.form, report.reportId, { deletionRequest: request });
+  return ok ? { ok } : { ok, error: 'Could not send the request. You may not have permission, or a request is already pending.' };
+}
+
+/** Manager: approve (archives the report) or reject a pending deletion request. */
+export async function decideDeletionRequest(
+  report: BaseReportData,
+  approve: boolean,
+  manager: { uid: string; email?: string | null }
+): Promise<boolean> {
+  const current = report.deletionRequest;
+  if (!current || current.status !== 'pending') return false;
+  const decided: DeletionRequest = {
+    ...current,
+    status: approve ? 'approved' : 'rejected',
+    decidedBy: manager.uid,
+    decidedByEmail: manager.email || '',
+    decidedAt: db ? serverTimestamp() : new Date().toISOString()
+  };
+  return updateReportMetadata(report.form, report.reportId, approve ? { deletionRequest: decided, deleted: true } : { deletionRequest: decided });
 }
 
 // In-memory mock session handlers for local preview mode
@@ -635,7 +685,7 @@ export async function signInWithEmail(
     mockUser = {
       uid: fakeUid,
       email: cleanEmail,
-      displayName: cleanEmail.split('@')[0].toUpperCase() + ' (Safety Officer)'
+      displayName: cleanEmail.split('@')[0].toUpperCase()
     };
     inMemoryStore.admins.add(fakeUid);
     inMemoryStore.admins.add(cleanEmail);

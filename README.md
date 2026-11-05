@@ -85,8 +85,20 @@ npm run setup:firebase -- --email admin@example.com --password YourPassword
 ```
 This creates the Firestore database (default location `africa-south1`, change with `--location`), publishes `firestore.rules`, turns on Email/Password sign-in, creates the admin login and adds it to `admins` and `qsaAdmins`. It shows the account and project and asks before changing anything, and is safe to re-run. Works on the free Spark plan. Options: `--project <id>`, `--account <email>`, `--location <loc>`, `--yes`.
 
-### CMS User Accounts
-In the CMS, **User Accounts** (QSA Inspectors only) lets you add users, email them a password-reset link, switch them between Safety Officer and QSA Inspector, and remove access. Everyone can change their own password under **My Account**. New users get a random password and an email link to set their own. Setting another user's password directly or deleting logins would need Cloud Functions (Blaze plan), so this uses reset emails instead. These features need the current `firestore.rules` deployed: `firebase deploy --only firestore:rules`.
+### CMS Privilege Levels & User Accounts
+Each CMS user has one of three levels (stored as `role` on `admins/{uid}`):
+
+| Level | Can |
+|---|---|
+| **Viewer** | View reports and attachments |
+| **Officer** | Also update status and notes, and **request deletion** of a report (with a reason) |
+| **Manager** | Also **approve or reject deletion requests**, archive/restore reports, see reporter identities, and manage users |
+
+Approved deletions **archive** the report: it disappears from the inbox but is kept, with who requested/approved it and why, and a Manager can restore it from the **Archived** view. Older setups' `qsaAdmins` members are treated as Managers; `admins` docs without a role are Officers.
+
+**User Accounts** (Managers): add a user with a level; the app creates their login with a temporary password and emails their login details from the company mailbox via Power Automate (`VITE_FLOW_URL_ACCOUNTS`, see `docs/POWER_AUTOMATE.md` section 5). They must choose their own password at first sign-in. Without that flow, Firebase emails a set-password link instead and the temporary password is shown to the Manager. Managers can also change levels, send reset emails and remove access, but never their own. Everyone can change their own password under **My Account**.
+
+These features need the current `firestore.rules` deployed: `firebase deploy --only firestore:rules`.
 
 ### Production Build & Firebase Deployment
 ```bash

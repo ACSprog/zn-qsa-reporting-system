@@ -11,23 +11,32 @@ import {
   CheckCircle2,
   AlertTriangle,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Copy
 } from 'lucide-react';
 import {
   CmsAccount,
+  AddAccountResult,
+  ROLE_INFO,
   listCmsAccounts,
   addCmsAccount,
-  setQsaAccess,
+  setAccountRole,
   removeCmsAccount,
   sendAccountPasswordReset,
-  changeOwnPassword
+  changeOwnPassword,
+  isWelcomeFlowConfigured
 } from '../lib/accounts';
+import { CmsRole } from '../types';
+
+const ROLES: CmsRole[] = ['viewer', 'officer', 'manager'];
 
 interface AccountsPanelProps {
   currentUid: string;
   currentEmail: string;
-  /** QSA Inspectors can manage users; Safety Officers only see "Change my password" */
+  /** Managers can manage users; everyone else only sees "Change my password" */
   canManage: boolean;
+  /** Called after the user changes their own password */
+  onPasswordChanged?: () => void;
 }
 
 type Notice = { kind: 'ok' | 'error'; text: string } | null;
@@ -56,7 +65,7 @@ const inputCls =
 const primaryBtn =
   'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#1B8E44] hover:bg-[#147236] text-white text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed';
 
-export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, currentEmail, canManage }) => {
+export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, currentEmail, canManage, onPasswordChanged }) => {
   const [accounts, setAccounts] = useState<CmsAccount[]>([]);
   const [loading, setLoading] = useState(false);
   const [listNotice, setListNotice] = useState<Notice>(null);
@@ -65,7 +74,9 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
   // Add user form
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
-  const [newQsa, setNewQsa] = useState(false);
+  const [newRole, setNewRole] = useState<CmsRole>('officer');
+  const [lastAdded, setLastAdded] = useState<{ email: string; result: AddAccountResult } | null>(null);
+  const [copied, setCopied] = useState(false);
   const [existingUid, setExistingUid] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -96,25 +107,34 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setAddNotice(null);
+    setLastAdded(null);
+    setCopied(false);
     setAdding(true);
+    const who = newEmail.trim();
     try {
       const res = await addCmsAccount(
-        { email: newEmail, name: newName, qsa: newQsa, existingUid: existingUid || undefined },
+        { email: newEmail, name: newName, role: newRole, existingUid: existingUid || undefined },
         currentEmail
       );
-      const who = newEmail.trim();
-      const first = res.createdLogin ? `Login created for ${who}.` : `CMS access granted to ${who}.`;
+      setLastAdded({ email: who, result: res });
+      const first = res.createdLogin ? `Login created for ${who} as ${ROLE_INFO[newRole].label}.` : `${who} now has ${ROLE_INFO[newRole].label} access.`;
       if (res.preview) {
         setAddNotice({ kind: 'ok', text: `${first} (Preview mode: no email is sent.)` });
-      } else if (res.resetEmailSent) {
-        setAddNotice({ kind: 'ok', text: `${first} They have been emailed a link to set their password (ask them to check spam).` });
+      } else if (res.emailVia === 'outlook') {
+        setAddNotice({ kind: 'ok', text: `${first} Their login details have been sent from the company mailbox.` });
+      } else if (res.emailVia === 'firebase') {
+        setAddNotice({
+          kind: 'ok',
+          text: `${first} The company welcome email is not set up yet, so Firebase emailed them a link to set their password.`
+        });
+      } else if (res.emailError) {
+        setAddNotice({ kind: 'error', text: `${first} Could not send an email (${res.emailError.replace(/\.$/, '')}).` });
       } else {
-        const reason = (res.resetError || 'unknown error').replace(/\.$/, '');
-        setAddNotice({ kind: 'error', text: `${first} Could not send the set-password email (${reason}). Use "Send reset email" in the list above.` });
+        setAddNotice({ kind: 'ok', text: first });
       }
       setNewEmail('');
       setNewName('');
-      setNewQsa(false);
+      setNewRole('officer');
       setExistingUid('');
       refresh();
     } catch (err: any) {
@@ -139,14 +159,14 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
     }
   };
 
-  const handleToggleQsa = async (acc: CmsAccount) => {
-    const on = !acc.isQsaAdmin;
-    if (!on && !window.confirm(`Remove QSA Inspector rights from ${acc.email || acc.uid}?\nThey will no longer see reporter identities or manage accounts.`)) return;
+  const handleRoleChange = async (acc: CmsAccount, role: CmsRole) => {
+    if (role === acc.role) return;
+    if (!window.confirm(`Change ${acc.email || acc.uid} from ${ROLE_INFO[acc.role].label} to ${ROLE_INFO[role].label}?\n\n${ROLE_INFO[role].description}`)) return;
     setBusyUid(acc.uid);
     setListNotice(null);
     try {
-      await setQsaAccess(acc, on, currentEmail);
-      setListNotice({ kind: 'ok', text: `${acc.email || acc.uid} is now ${on ? 'a QSA Inspector' : 'a Safety Officer'}.` });
+      await setAccountRole(acc, role);
+      setListNotice({ kind: 'ok', text: `${acc.email || acc.uid} is now a ${ROLE_INFO[role].label}.` });
       refresh();
     } catch (e: any) {
       setListNotice({ kind: 'error', text: e.message });
@@ -160,7 +180,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
     setBusyUid(acc.uid);
     setListNotice(null);
     try {
-      await removeCmsAccount(acc.uid);
+      await removeCmsAccount(acc);
       setListNotice({ kind: 'ok', text: `CMS access removed for ${acc.email || acc.uid}.` });
       refresh();
     } catch (e: any) {
@@ -181,6 +201,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
     try {
       await changeOwnPassword(curPw, newPw);
       setPwNotice({ kind: 'ok', text: 'Your password has been changed.' });
+      onPasswordChanged?.();
       setCurPw('');
       setNewPw('');
       setNewPw2('');
@@ -197,8 +218,8 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
         <h2 className="text-lg font-black text-slate-900">User Accounts</h2>
         <p className="text-xs text-slate-500">
           {canManage
-            ? 'Add CMS users, send password reset links, and control who can see confidential reporter identities.'
-            : 'Change your password. Ask a QSA Inspector if you need another user added or reset.'}
+            ? 'Add CMS users, choose their privilege level, and send password reset links.'
+            : 'Change your password. Ask a Manager if you need another user added or reset.'}
         </p>
       </div>
 
@@ -252,16 +273,29 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                       <div className="text-[10px] font-mono text-slate-400 mt-0.5">UID: {acc.uid}</div>
                     </td>
                     <td className="px-3 py-3">
-                      {acc.isQsaAdmin ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-[#F37C1C]/15 text-[#b95a0d] border border-[#F37C1C]/30">
-                          <ShieldCheck className="w-3 h-3" /> QSA Inspector
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                          Safety Officer
-                        </span>
+                      <select
+                        value={acc.role}
+                        disabled={busy || isMe}
+                        onChange={(e) => handleRoleChange(acc, e.target.value as CmsRole)}
+                        title={isMe ? 'You cannot change your own level' : ROLE_INFO[acc.role].description}
+                        className={`text-[11px] font-black rounded-full px-2.5 py-1 border disabled:opacity-80 disabled:cursor-not-allowed ${
+                          acc.role === 'manager'
+                            ? 'bg-[#F37C1C]/15 text-[#b95a0d] border-[#F37C1C]/30'
+                            : acc.role === 'officer'
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              : 'bg-slate-100 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {ROLES.map((r) => (
+                          <option key={r} value={r}>
+                            {ROLE_INFO[r].label}
+                          </option>
+                        ))}
+                      </select>
+                      {acc.mustChangePassword && (
+                        <div className="text-[10px] text-amber-700 mt-1">Hasn't set their own password yet</div>
                       )}
-                      {!acc.isAdmin && (
+                      {!acc.hasAccess && (
                         <div className="text-[10px] text-rose-600 mt-1">Missing CMS access (not in admins)</div>
                       )}
                     </td>
@@ -275,15 +309,6 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                         >
                           {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
                           Send reset email
-                        </button>
-                        <button
-                          onClick={() => handleToggleQsa(acc)}
-                          disabled={busy || isMe || !acc.isAdmin}
-                          title={isMe ? 'You cannot change your own role' : acc.isQsaAdmin ? 'Make Safety Officer' : 'Make QSA Inspector'}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 disabled:opacity-40"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          {acc.isQsaAdmin ? 'Make Officer' : 'Make QSA'}
                         </button>
                         <button
                           onClick={() => handleRemove(acc)}
@@ -310,8 +335,14 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
           </table>
         </div>
         <div className="px-5 py-3 border-t border-slate-100 text-[11px] text-slate-500">
-          <strong>Safety Officer:</strong> can view and manage reports. <strong>QSA Inspector:</strong> can also see reporter identities and manage these accounts.
-          Reset emails come from Firebase (<em>noreply@…firebaseapp.com</em>) and may land in spam.
+          {ROLES.map((r) => (
+            <span key={r} className="block">
+              <strong>{ROLE_INFO[r].label}:</strong> {ROLE_INFO[r].description}
+            </span>
+          ))}
+          <span className="block mt-1">
+            "Send reset email" comes from Firebase (<em>noreply@…firebaseapp.com</em>) and may land in spam.
+          </span>
         </div>
       </div>
 
@@ -326,7 +357,9 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
             <UserPlus className="w-4 h-4 text-[#1B8E44]" /> Add a User
           </div>
           <p className="text-[11px] text-slate-500">
-            Creates their login and emails them a link to choose their own password.
+            {isWelcomeFlowConfigured()
+              ? 'Creates their login and emails their login details (with a temporary password) from the company mailbox. They must change the password at first sign-in.'
+              : 'Creates their login with a temporary password they must change at first sign-in. The company welcome email is not set up yet (VITE_FLOW_URL_ACCOUNTS), so Firebase emails them a set-password link instead.'}
           </p>
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">Email</label>
@@ -336,12 +369,17 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
             <label className="block text-xs font-bold text-slate-700 mb-1">Full name (optional)</label>
             <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} className={inputCls} maxLength={200} />
           </div>
-          <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
-            <input type="checkbox" checked={newQsa} onChange={(e) => setNewQsa(e.target.checked)} className="mt-0.5" />
-            <span>
-              <strong>QSA Inspector</strong>: can see confidential reporter identities and manage user accounts
-            </span>
-          </label>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Privilege level</label>
+            <select value={newRole} onChange={(e) => setNewRole(e.target.value as CmsRole)} className={inputCls}>
+              {ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {ROLE_INFO[r].label}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-500 mt-1">{ROLE_INFO[newRole].description}</p>
+          </div>
           <button
             type="button"
             onClick={() => setShowAdvanced((v) => !v)}
@@ -357,6 +395,28 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
             </div>
           )}
           <NoticeBox notice={addNotice} />
+          {lastAdded?.result.tempPassword && (
+            <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-900 space-y-1.5">
+              <div className="font-bold">Temporary password for {lastAdded.email}</div>
+              <div className="flex items-center gap-2">
+                <code className="px-2 py-1 rounded bg-white border border-amber-200 font-mono text-sm tracking-wider">
+                  {lastAdded.result.tempPassword}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(lastAdded.result.tempPassword || '').then(() => setCopied(true)).catch(() => undefined);
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded border border-amber-300 hover:bg-amber-100 font-bold"
+                >
+                  <Copy className="w-3 h-3" /> {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <div className="text-[11px]">
+                Only shown now. Give it to them yourself if the email doesn't arrive. They'll be asked to change it when they first sign in.
+              </div>
+            </div>
+          )}
           <button type="submit" disabled={adding} className={primaryBtn}>
             {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
             Add user
