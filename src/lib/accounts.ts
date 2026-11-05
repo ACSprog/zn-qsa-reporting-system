@@ -25,6 +25,7 @@ import {
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   writeBatch,
   setDoc,
@@ -429,4 +430,47 @@ export async function clearMustChangePassword(): Promise<void> {
   } catch (e) {
     throw new Error(friendlyError(e));
   }
+}
+
+// ---------- Super Admin security controls ----------
+
+/** Whether 2FA is currently required for every CMS user. */
+export async function getRequire2fa(): Promise<boolean> {
+  const { db } = getFirebaseHandles();
+  if (!db) return previewRequire2fa;
+  const snap = await getDoc(doc(db, 'settings', 'security'));
+  return snap.exists() && snap.data()?.require2fa === true;
+}
+
+let previewRequire2fa = false;
+
+/** Super Admin: switch the 2FA requirement on or off. */
+export async function setRequire2fa(value: boolean, byEmail: string): Promise<void> {
+  const { db, auth } = getFirebaseHandles();
+  if (!db || !auth) {
+    previewRequire2fa = value;
+    return;
+  }
+  if (value) {
+    const token = await auth.currentUser?.getIdTokenResult();
+    if (!token?.signInSecondFactor) {
+      throw new Error(
+        'Set up 2FA on your own account first (My Account), then sign out and back in with your code. This proves authenticator codes work before everyone is required to use them.'
+      );
+    }
+  }
+  try {
+    await setDoc(doc(db, 'settings', 'security'), { require2fa: value, updatedBy: byEmail, updatedAt: serverTimestamp() });
+  } catch (e) {
+    throw new Error(friendlyError(e));
+  }
+}
+
+/**
+ * The command the project owner runs to remove someone's lost authenticator (free plan).
+ * Includes this site's Firebase project, so it is right for test and live alike.
+ */
+export function reset2faCommand(email: string): string {
+  const projectId = getFirebaseHandles().firebaseConfig.projectId;
+  return `npm run reset-2fa -- --email ${email}${projectId ? ` --project ${projectId}` : ''}`;
 }

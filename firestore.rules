@@ -105,10 +105,17 @@ service cloud.firestore {
     }
 
     // Security settings: readable by signed-in users so the CMS knows whether 2FA is required.
-    // Only changed by the setup script (server credentials), never from the browser.
+    // Super Admins can switch the 2FA requirement on or off from the CMS. Turning it ON is only
+    // allowed from a session that itself used 2FA, which proves authenticator codes work for this
+    // project (otherwise everyone could be locked out). The setup script can always change it.
     match /settings/{doc} {
       allow read: if isSignedIn();
-      allow write: if false;
+      allow create, update: if doc == 'security'
+        && isSuperAdmin()
+        && request.resource.data.keys().hasOnly(['require2fa', 'updatedBy', 'updatedAt'])
+        && request.resource.data.require2fa is bool
+        && (request.resource.data.require2fa == false || has2fa());
+      allow delete: if false;
     }
 
     function reportChanges() {
