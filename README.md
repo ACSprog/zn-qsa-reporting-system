@@ -86,19 +86,34 @@ npm run setup:firebase -- --email admin@example.com --password YourPassword
 This creates the Firestore database (default location `africa-south1`, change with `--location`), publishes `firestore.rules`, turns on Email/Password sign-in, creates the admin login and adds it to `admins` and `qsaAdmins`. It shows the account and project and asks before changing anything, and is safe to re-run. Works on the free Spark plan. Options: `--project <id>`, `--account <email>`, `--location <loc>`, `--yes`.
 
 ### CMS Privilege Levels & User Accounts
-Each CMS user has one of three levels (stored as `role` on `admins/{uid}`):
+Each CMS user has one of four levels (stored as `role` on `admins/{uid}`):
 
 | Level | Can |
 |---|---|
 | **Viewer** | View reports and attachments |
 | **Officer** | Also update status and notes, and **request deletion** of a report (with a reason) |
-| **Manager** | Also **approve or reject deletion requests**, archive/restore reports, see reporter identities, and manage users |
+| **Manager** | Also **approve or reject deletion requests**, archive/restore reports, see reporter identities, and add / change / block / remove **Viewers and Officers** |
+| **Super Admin** | Everything, including creating, promoting, blocking and removing **Managers and Super Admins** |
 
-Approved deletions **archive** the report: it disappears from the inbox but is kept, with who requested/approved it and why, and a Manager can restore it from the **Archived** view. Older setups' `qsaAdmins` members are treated as Managers; `admins` docs without a role are Officers.
+Nobody can change, block or remove their own account. `npm run setup:firebase` makes the given login a Super Admin. Older setups' `qsaAdmins` members are treated as Managers until a Super Admin changes them; `admins` docs without a role are Officers.
 
-**User Accounts** (Managers): add a user with a level; the app creates their login with a temporary password and emails their login details from the company mailbox via Power Automate (`VITE_FLOW_URL_ACCOUNTS`, see `docs/POWER_AUTOMATE.md` section 5). They must choose their own password at first sign-in. Without that flow, Firebase emails a set-password link instead and the temporary password is shown to the Manager. Managers can also change levels, send reset emails and remove access, but never their own. Everyone can change their own password under **My Account**.
+Approved deletions **archive** the report: it disappears from the inbox but is kept, with who requested/approved it and why, and a Manager can restore it from the **Archived** view.
 
-These features need the current `firestore.rules` deployed: `firebase deploy --only firestore:rules`.
+**User Accounts** (Managers and Super Admins): add a user with a level; the app creates their login with a temporary password and emails their login details from the company mailbox via Power Automate (`VITE_FLOW_URL_ACCOUNTS`, see `docs/POWER_AUTOMATE.md` section 5). They must choose their own password at first sign-in. Without that flow, Firebase emails a set-password link instead and the temporary password is shown to the Manager. **Block** stops access immediately but keeps the user listed (one click to unblock); **Remove** is for people who have left. Everyone can change their own password under **My Account**.
+
+### Two-Step Sign-In (2FA)
+Authenticator-app codes (Google / Microsoft Authenticator), required for every CMS user and enforced by the security rules.
+
+```bash
+npm run setup:firebase -- --email you@zambiaairways.co.zm --enable-2fa
+```
+This upgrades the project to *Firebase Authentication with Identity Platform* (free on the Spark plan, up to 3,000 daily active users), turns on authenticator-app 2FA, and sets `settings/security.require2fa = true`. At their next sign-in each user verifies their email, scans a QR code and confirms a code; after that, sign-in asks for the 6-digit code after the password.
+
+- **Lost phone:** the Firebase project owner runs `npm run reset-2fa -- --email person@zambiaairways.co.zm`; the user sets it up again at next sign-in.
+- **Emergency:** `npm run setup:firebase -- --email you@... --relax-2fa` stops requiring 2FA.
+- The local emulators don't support authenticator-app 2FA, so it is never required there.
+
+These features need the current `firestore.rules` deployed: `firebase deploy --only firestore:rules` (the setup script does this).
 
 ### Production Build & Firebase Deployment
 ```bash

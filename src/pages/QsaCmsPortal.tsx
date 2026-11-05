@@ -33,6 +33,7 @@ import {
 import {
   BaseReportData,
   CmsRole,
+  isManagerRole,
   FormType,
   ReportingType,
   ReportStatus
@@ -47,6 +48,7 @@ import {
   subscribeToAuthState,
   verifyUserRoles,
   fetchReporterIdentity,
+  completeMfaSignIn,
   subscribeToAllReports,
   backendMode,
   clearPreviewReports,
@@ -54,8 +56,13 @@ import {
 } from '../lib/firebase';
 import { DetailDrawer } from '../components/DetailDrawer';
 import { AccountsPanel } from '../components/AccountsPanel';
+import { ROLE_INFO } from '../lib/accounts';
 import { FirstLoginPasswordChange } from '../components/FirstLoginPasswordChange';
+import { TwoFactorRequired, isEnrolledIn2fa } from '../components/TwoFactorSetup';
+import type { MultiFactorResolver } from 'firebase/auth';
 import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
+
+const ISSUER_LABEL = 'Zambia Airways QSA';
 
 type CmsTab = 'inbox' | 'analytics' | 'sync' | 'accounts' | 'settings';
 
@@ -72,7 +79,13 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   const [isQsaAdmin, setIsQsaAdmin] = useState<boolean>(false);
   const [role, setRole] = useState<CmsRole | null>(null);
   const [mustChangePassword, setMustChangePassword] = useState<boolean>(false);
-  const isManager = role === 'manager';
+  // 2FA
+  const [require2fa, setRequire2fa] = useState<boolean>(false);
+  const [session2fa, setSession2fa] = useState<boolean>(false);
+  const [enrolled2fa, setEnrolled2fa] = useState<boolean>(false);
+  const [mfaResolver, setMfaResolver] = useState<MultiFactorResolver | null>(null);
+  const [mfaCode, setMfaCode] = useState<string>('');
+  const isManager = isManagerRole(role);
   const [authError, setAuthError] = useState<string | null>(null);
 
   // Active CMS Navigation Tab
@@ -129,7 +142,11 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
         setCurrentUser(user);
         const roles = await verifyUserRoles(user);
         if (!roles.isAdmin) {
-          setAuthError('Access Denied: Your account is not authorized as a Zambia Airways safety administrator.');
+          setAuthError(
+            roles.blocked
+              ? 'Your account has been blocked. Contact a QSA Manager if you think this is a mistake.'
+              : 'Access Denied: Your account is not authorized as a Zambia Airways safety administrator.'
+          );
           await signOutUser();
           setIsAdmin(false);
           setIsQsaAdmin(false);
@@ -140,6 +157,15 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
           setIsQsaAdmin(roles.isQsaAdmin);
           setRole(roles.role);
           setMustChangePassword(roles.mustChangePassword);
+          setRequire2fa(roles.require2fa);
+          if (typeof (user as any).getIdTokenResult === 'function') {
+            const token = await (user as any).getIdTokenResult();
+            setSession2fa(Boolean(token.signInSecondFactor));
+            setEnrolled2fa(isEnrolledIn2fa(user as any));
+          } else {
+            setSession2fa(false);
+            setEnrolled2fa(false);
+          }
           setAuthError(null);
         }
       } else {
@@ -207,7 +233,10 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
     setIsSubmittingAuth(true);
     try {
       const res = await signInWithEmail(loginEmail, loginPassword);
-      if (res.error) {
+      if (res.mfaResolver) {
+        setMfaResolver(res.mfaResolver);
+        setMfaCode('');
+      } else if (res.error) {
         setAuthError(res.error);
       } else if (res.user) {
         if (rememberMe) {
@@ -218,6 +247,25 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
       }
     } catch (err: any) {
       setAuthError(err?.message || 'Authentication error.');
+    } finally {
+      setIsSubmittingAuth(false);
+    }
+  };
+
+  const handleMfaCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mfaResolver) return;
+    setAuthError(null);
+    setIsSubmittingAuth(true);
+    try {
+      const res = await completeMfaSignIn(mfaResolver, mfaCode);
+      if (res.error) {
+        setAuthError(res.error);
+      } else {
+        setMfaResolver(null);
+        setMfaCode('');
+        if (rememberMe) localStorage.setItem('za_cms_remembered_email', loginEmail.trim());
+      }
     } finally {
       setIsSubmittingAuth(false);
     }
@@ -486,7 +534,51 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
 
             )}
 
+            {mfaResolver && (
+              <form onSubmit={handleMfaCode} className="space-y-4 text-left pt-1">
+                <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-start gap-2">
+                  <Shield className="w-4 h-4 text-[#1B8E44] shrink-0 mt-0.5" />
+                  <span>
+                    Password accepted. Open your authenticator app and enter the 6-digit code for <strong>{ISSUER_LABEL}</strong>.
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Authentication code</label>
+                  <input
+                    autoFocus
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={7}
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value)}
+                    placeholder="123456"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-300 font-mono text-xl tracking-[0.4em] text-center focus:outline-none focus:ring-2 focus:ring-[#1B8E44]/40"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSubmittingAuth || mfaCode.replace(/\s/g, '').length < 6}
+                  className="w-full py-3 px-4 rounded-xl bg-[#1B8E44] hover:bg-[#147236] text-white font-extrabold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {isSubmittingAuth ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4 text-[#F37C1C]" />}
+                  <span>Verify and sign in</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMfaResolver(null);
+                    setMfaCode('');
+                    setAuthError(null);
+                  }}
+                  className="w-full text-xs text-slate-500 hover:text-slate-800"
+                >
+                  Back
+                </button>
+              </form>
+            )}
+
             {/* Email & Password Authentication Form */}
+            {!mfaResolver && (
             <form onSubmit={handleEmailPasswordSignIn} className="space-y-4 text-left pt-1">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -577,6 +669,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                 )}
               </button>
             </form>
+            )}
 
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
               <span className="font-semibold text-slate-600">Zambia Airways Safety System</span>
@@ -690,6 +783,11 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
     );
   }
 
+  // 2FA required for everyone but this session didn't use it (not set up yet)
+  if (require2fa && !session2fa) {
+    return <TwoFactorRequired email={currentUser?.email || ''} enrolled={enrolled2fa} onSignOut={handleSignOut} />;
+  }
+
   // 3. Full CMS Dashboard Layout
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col md:flex-row text-slate-900 font-sans selection:bg-[#1B8E44] selection:text-white">
@@ -801,7 +899,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
               </div>
               <div className="text-[10px] text-emerald-300 flex items-center gap-1 font-medium mt-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                {role === 'manager' ? 'Manager' : role === 'viewer' ? 'Viewer' : 'Officer'}
+                {role ? ROLE_INFO[role].label : ''}
               </div>
             </div>
             <button
@@ -1384,6 +1482,11 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
             currentUid={currentUser?.uid || ''}
             currentEmail={currentUser?.email || ''}
             canManage={isManager}
+            myRole={role}
+            onTwoFactorEnrolled={async () => {
+              window.alert('2FA is now on. Please sign in again: after your password you will be asked for the code from your app.');
+              await handleSignOut();
+            }}
           />
         )}
 

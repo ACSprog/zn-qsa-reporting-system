@@ -5,7 +5,10 @@ export type ReportingType = 'Named' | 'Confidential' | 'Anonymous';
 export type ReportStatus = 'New' | 'Under review' | 'Action required' | 'Closed';
 
 /** CMS privilege levels (lowest to highest) */
-export type CmsRole = 'viewer' | 'officer' | 'manager';
+export type CmsRole = 'viewer' | 'officer' | 'manager' | 'superadmin';
+
+/** Manager and Super Admin share the Manager powers over reports */
+export const isManagerRole = (role: CmsRole | null | undefined) => role === 'manager' || role === 'superadmin';
 
 export interface DeletionRequest {
   status: 'pending' | 'approved' | 'rejected';

@@ -42,9 +42,29 @@ export const ROLE_INFO: Record<CmsRole, { label: string; description: string }> 
   },
   manager: {
     label: 'Manager',
-    description: 'Full access: approves deletions, archives/restores reports, sees reporter identities, manages users.'
+    description: 'Approves deletions, archives/restores reports, sees reporter identities, manages Viewers and Officers.'
+  },
+  superadmin: {
+    label: 'Super Admin',
+    description: 'Everything a Manager can do, plus creating, promoting, blocking and removing Managers and Super Admins.'
   }
 };
+
+export const ALL_ROLES: CmsRole[] = ['viewer', 'officer', 'manager', 'superadmin'];
+
+/** Levels a user with `myRole` may give to others. */
+export function assignableRoles(myRole: CmsRole | null): CmsRole[] {
+  if (myRole === 'superadmin') return ALL_ROLES;
+  if (myRole === 'manager') return ['viewer', 'officer'];
+  return [];
+}
+
+/** Whether `myRole` may change, block or remove `target` (never yourself; checked separately). */
+export function canManageAccount(myRole: CmsRole | null, target: CmsAccount): boolean {
+  if (myRole === 'superadmin') return true;
+  if (myRole === 'manager') return (target.role === 'viewer' || target.role === 'officer') && !target.legacyManager;
+  return false;
+}
 
 export interface CmsAccount {
   uid: string;
@@ -56,6 +76,8 @@ export interface CmsAccount {
   /** Older setups mark Managers with a qsaAdmins/{uid} doc */
   legacyManager: boolean;
   mustChangePassword: boolean;
+  /** enabled == false: can't use the CMS until unblocked */
+  blocked: boolean;
 }
 
 export interface AddAccountInput {
@@ -85,10 +107,11 @@ const previewAccounts = new Map<string, CmsAccount>([
       uid: 'admin-demo-user',
       email: 'admin@zambiaairways.co.zm',
       name: 'Demo Admin',
-      role: 'manager',
+      role: 'superadmin',
       hasAccess: true,
       legacyManager: false,
-      mustChangePassword: false
+      mustChangePassword: false,
+      blocked: false
     }
   ]
 ]);
@@ -106,7 +129,7 @@ function friendlyError(e: any): string {
     'auth/too-many-requests': 'Too many attempts. Wait a few minutes and try again.',
     'auth/requires-recent-login': 'Please sign out and sign in again, then retry.',
     'permission-denied':
-      'Permission denied. Only Managers can manage accounts (and not their own), and the latest firestore.rules must be deployed.'
+      'Permission denied. Managers can only manage Viewers and Officers, Super Admins can manage everyone, nobody can change their own account, and the latest firestore.rules must be deployed.'
   };
   return map[code] || e?.message || 'Something went wrong.';
 }
@@ -186,7 +209,7 @@ export async function listCmsAccounts(): Promise<CmsAccount[]> {
     const byUid = new Map<string, CmsAccount>();
     adminSnap.forEach((d) => {
       const data = d.data() || {};
-      const role = (['viewer', 'officer', 'manager'] as CmsRole[]).includes(data.role) ? (data.role as CmsRole) : 'officer';
+      const role = ALL_ROLES.includes(data.role) ? (data.role as CmsRole) : 'officer';
       byUid.set(d.id, {
         uid: d.id,
         email: data.email || '',
@@ -194,7 +217,8 @@ export async function listCmsAccounts(): Promise<CmsAccount[]> {
         role,
         hasAccess: true,
         legacyManager: false,
-        mustChangePassword: data.mustChangePassword === true
+        mustChangePassword: data.mustChangePassword === true,
+        blocked: data.enabled === false
       });
     });
     qsaSnap.forEach((d) => {
@@ -206,10 +230,11 @@ export async function listCmsAccounts(): Promise<CmsAccount[]> {
         role: 'manager' as CmsRole,
         hasAccess: false,
         legacyManager: true,
-        mustChangePassword: false
+        mustChangePassword: false,
+        blocked: false
       };
       cur.legacyManager = true;
-      cur.role = 'manager';
+      if (cur.role !== 'superadmin') cur.role = 'manager';
       cur.email = cur.email || data.email || '';
       cur.name = cur.name || data.name || '';
       byUid.set(d.id, cur);
@@ -241,7 +266,8 @@ export async function addCmsAccount(input: AddAccountInput, invitedByEmail: stri
       role: input.role,
       hasAccess: true,
       legacyManager: false,
-      mustChangePassword: Boolean(tempPassword)
+      mustChangePassword: Boolean(tempPassword),
+      blocked: false
     });
     return { uid, createdLogin: !input.existingUid, tempPassword, emailVia: 'none', preview: true };
   }
@@ -314,10 +340,29 @@ export async function setAccountRole(account: CmsAccount, role: CmsRole): Promis
   }
   try {
     const batch = writeBatch(db);
-    batch.set(doc(db, 'admins', account.uid), { enabled: true, email: account.email || '', role }, { merge: true });
+    batch.set(doc(db, 'admins', account.uid), { enabled: !account.blocked, email: account.email || '', role }, { merge: true });
     // Old-style Manager marker would otherwise keep them a Manager
     if (account.legacyManager && role !== 'manager') batch.delete(doc(db, 'qsaAdmins', account.uid));
     await batch.commit();
+  } catch (e) {
+    throw new Error(friendlyError(e));
+  }
+}
+
+/** Block (access stops immediately, user stays in the list) or unblock. */
+export async function setAccountBlocked(account: CmsAccount, blocked: boolean): Promise<void> {
+  const { db } = getFirebaseHandles();
+  if (!db) {
+    const cur = previewAccounts.get(account.uid);
+    if (cur) cur.blocked = blocked;
+    return;
+  }
+  try {
+    await setDoc(
+      doc(db, 'admins', account.uid),
+      { enabled: !blocked, email: account.email || '', role: account.role },
+      { merge: true }
+    );
   } catch (e) {
     throw new Error(friendlyError(e));
   }

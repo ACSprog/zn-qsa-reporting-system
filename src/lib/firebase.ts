@@ -25,6 +25,9 @@ import {
   sendPasswordResetEmail,
   signOut as fbSignOut,
   onAuthStateChanged,
+  getMultiFactorResolver,
+  TotpMultiFactorGenerator,
+  MultiFactorResolver,
   User
 } from 'firebase/auth';
 import {
@@ -34,7 +37,8 @@ import {
   ReporterIdentity,
   ReportStatus,
   CmsRole,
-  DeletionRequest
+  DeletionRequest,
+  isManagerRole
 } from '../types';
 import { stripIdentityIfAnonymous, getCategoryForForm } from './idGenerator';
 
@@ -562,34 +566,63 @@ export async function fetchReportEvidence(
  */
 export interface UserRoles {
   isAdmin: boolean;
-  /** Manager: can see reporter identities (kept for existing callers) */
+  /** Manager or Super Admin: can see reporter identities (kept for existing callers) */
   isQsaAdmin: boolean;
   role: CmsRole | null;
   mustChangePassword: boolean;
+  /** Account exists but a Manager blocked it */
+  blocked: boolean;
+  /** settings/security.require2fa */
+  require2fa: boolean;
 }
 
-/** Preview mode only: sign in as viewer@..., officer@... to try the lower levels */
+const VALID_ROLES: CmsRole[] = ['viewer', 'officer', 'manager', 'superadmin'];
+
+/** Preview mode only: sign in as viewer@..., officer@..., manager@... to try the lower levels */
 function previewRoleFor(email?: string | null): CmsRole {
   const e = (email || '').toLowerCase();
   if (e.startsWith('viewer')) return 'viewer';
   if (e.startsWith('officer')) return 'officer';
-  return 'manager';
+  if (e.startsWith('manager')) return 'manager';
+  return 'superadmin';
 }
 
 export async function verifyUserRoles(user: User | { uid: string; email?: string | null }): Promise<UserRoles> {
-  const none: UserRoles = { isAdmin: false, isQsaAdmin: false, role: null, mustChangePassword: false };
+  const none: UserRoles = { isAdmin: false, isQsaAdmin: false, role: null, mustChangePassword: false, blocked: false, require2fa: false };
   if (!user) return none;
 
   if (db) {
     try {
       const adminDoc = await getDoc(doc(db, 'admins', user.uid));
       if (!adminDoc.exists()) return none;
-      const qsaDoc = await getDoc(doc(db, 'qsaAdmins', user.uid));
       const data = adminDoc.data() || {};
-      // Legacy qsaAdmins members are Managers; docs without a role are Officers
+      if (data.enabled === false) return { ...none, blocked: true };
+      const qsaDoc = await getDoc(doc(db, 'qsaAdmins', user.uid));
+      let require2fa = false;
+      try {
+        const sec = await getDoc(doc(db, 'settings', 'security'));
+        require2fa = sec.exists() && sec.data()?.require2fa === true;
+      } catch {
+        // older rules without settings access: treat as not required
+      }
+      // Stored Super Admin wins; legacy qsaAdmins members are Managers; role-less docs are Officers
       const stored = data.role as CmsRole | undefined;
-      const role: CmsRole = qsaDoc.exists() ? 'manager' : stored && ['viewer', 'officer', 'manager'].includes(stored) ? stored : 'officer';
-      return { isAdmin: true, isQsaAdmin: role === 'manager', role, mustChangePassword: data.mustChangePassword === true };
+      const role: CmsRole =
+        stored === 'superadmin'
+          ? 'superadmin'
+          : qsaDoc.exists()
+            ? 'manager'
+            : stored && VALID_ROLES.includes(stored)
+              ? stored
+              : 'officer';
+      return {
+        isAdmin: true,
+        isQsaAdmin: isManagerRole(role),
+        role,
+        mustChangePassword: data.mustChangePassword === true,
+        blocked: false,
+        require2fa
+      };
     } catch {
       return none;
     }
@@ -598,7 +631,7 @@ export async function verifyUserRoles(user: User | { uid: string; email?: string
     return none;
   } else {
     const role = previewRoleFor(user.email);
-    return { isAdmin: true, isQsaAdmin: role === 'manager', role, mustChangePassword: false };
+    return { isAdmin: true, isQsaAdmin: isManagerRole(role), role, mustChangePassword: false, blocked: false, require2fa: false };
   }
 }
 
@@ -649,7 +682,7 @@ const mockAuthListeners: Array<(user: any) => void> = [];
 export async function signInWithEmail(
   email: string,
   password: string
-): Promise<{ user: User | any | null; error?: string }> {
+): Promise<{ user: User | any | null; error?: string; mfaResolver?: MultiFactorResolver }> {
   const cleanEmail = email.trim().toLowerCase();
   if (!cleanEmail || !password) {
     return { user: null, error: 'Please enter both your email address and password.' };
@@ -660,6 +693,10 @@ export async function signInWithEmail(
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
       return { user: cred.user };
     } catch (err: any) {
+      // Password was right; now the authenticator-app code is needed
+      if (err?.code === 'auth/multi-factor-auth-required') {
+        return { user: null, mfaResolver: getMultiFactorResolver(auth, err) };
+      }
       let message = 'Invalid email or password. Please verify your credentials.';
       if (
         err.code === 'auth/user-not-found' ||
@@ -693,6 +730,28 @@ export async function signInWithEmail(
     inMemoryStore.qsaAdmins.add(cleanEmail);
     mockAuthListeners.forEach((cb) => cb(mockUser));
     return { user: mockUser };
+  }
+}
+
+/** Second sign-in step: the 6-digit code from the authenticator app. */
+export async function completeMfaSignIn(
+  resolver: MultiFactorResolver,
+  code: string
+): Promise<{ user: User | null; error?: string }> {
+  const hint = resolver.hints.find((h) => h.factorId === TotpMultiFactorGenerator.FACTOR_ID);
+  if (!hint) return { user: null, error: 'No authenticator app is set up for this account. Contact a Super Admin.' };
+  try {
+    const assertion = TotpMultiFactorGenerator.assertionForSignIn(hint.uid, code.replace(/\s/g, ''));
+    const cred = await resolver.resolveSignIn(assertion);
+    return { user: cred.user };
+  } catch (err: any) {
+    if (err?.code === 'auth/invalid-verification-code' || err?.code === 'auth/totp-challenge-timeout') {
+      return { user: null, error: 'That code is not right or has expired. Enter the current 6-digit code from your app.' };
+    }
+    if (err?.code === 'auth/too-many-requests') {
+      return { user: null, error: 'Too many attempts. Wait a few minutes and try again.' };
+    }
+    return { user: null, error: err?.message || 'Could not verify the code.' };
   }
 }
 

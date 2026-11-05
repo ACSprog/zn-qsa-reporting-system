@@ -28,7 +28,8 @@ import {
   ProcessedEvidenceFile,
   ReporterIdentity,
   ReportStatus,
-  CmsRole
+  CmsRole,
+  isManagerRole
 } from '../types';
 import { FORMS_META, getFormFields } from '../config/fields';
 import { STATUS_OPTIONS } from '../config/options';
@@ -66,8 +67,8 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
   role,
   currentUser
 }) => {
-  const isManager = role === 'manager';
-  const canEdit = role === 'manager' || role === 'officer';
+  const isManager = isManagerRole(role);
+  const canEdit = isManager || role === 'officer';
 
   const [showDeleteForm, setShowDeleteForm] = useState<boolean>(false);
   const [deleteReason, setDeleteReason] = useState<string>('');

@@ -31,7 +31,7 @@ async function setRoleDoc(collection, uid) {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' }, // emulator admin bypass
     body: JSON.stringify({
-      fields: { enabled: { booleanValue: true }, email: { stringValue: email }, role: { stringValue: 'manager' } }
+      fields: { enabled: { booleanValue: true }, email: { stringValue: email }, role: { stringValue: 'superadmin' } }
     })
   });
   if (!res.ok) throw new Error(`Could not write ${collection}/${uid}: ${res.status} ${await res.text()}`);
@@ -39,8 +39,8 @@ async function setRoleDoc(collection, uid) {
 
 try {
   const uid = await getOrCreateUser();
-  await setRoleDoc('admins', uid); // role: manager (highest level)
-  console.log(`✔ Manager login ready in local emulators\n  Email:    ${email}\n  Password: ${password}\n  UID:      ${uid}`);
+  await setRoleDoc('admins', uid); // role: superadmin (highest level)
+  console.log(`✔ Super Admin login ready in local emulators\n  Email:    ${email}\n  Password: ${password}\n  UID:      ${uid}`);
 } catch (e) {
   const msg = e?.cause?.code === 'ECONNREFUSED' ? 'Emulators are not running. Start them first with: npm run emulators' : e.message;
   console.error(`✘ ${msg}`);
