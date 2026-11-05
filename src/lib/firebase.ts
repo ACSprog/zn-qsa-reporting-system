@@ -81,6 +81,11 @@ if (isFirebaseConfigured) {
   }
 }
 
+/** Internal handles for other modules in src/lib (accounts management). */
+export function getFirebaseHandles() {
+  return { app, db, auth, firebaseConfig };
+}
+
 // Fallback store for preview / local testing before Firebase config is set.
 // In development builds only, it is mirrored to this browser's localStorage so reports
 // survive reloads and are shared between tabs. Production builds never use localStorage

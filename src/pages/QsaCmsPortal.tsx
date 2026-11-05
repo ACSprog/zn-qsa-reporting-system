@@ -26,7 +26,9 @@ import {
   Mail,
   EyeOff,
   KeyRound,
-  X
+  X,
+  Users,
+  Home
 } from 'lucide-react';
 import {
   BaseReportData,
@@ -50,16 +52,17 @@ import {
   usingEmulators
 } from '../lib/firebase';
 import { DetailDrawer } from '../components/DetailDrawer';
+import { AccountsPanel } from '../components/AccountsPanel';
 import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
 
-type CmsTab = 'inbox' | 'analytics' | 'sync' | 'settings';
+type CmsTab = 'inbox' | 'analytics' | 'sync' | 'accounts' | 'settings';
 
 interface QsaCmsPortalProps {
   onNavigatePublicSite?: () => void;
   onNavigatePublicForm?: (form: FormType) => void;
 }
 
-export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
+export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite }) => {
   // Authentication & Authorization state
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isVerifyingAuth, setIsVerifyingAuth] = useState<boolean>(true);
@@ -557,6 +560,19 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
           </div>
         </div>
 
+        {onNavigatePublicSite && (
+          <div className="max-w-md w-full mx-auto mt-4 text-center">
+            <button
+              type="button"
+              onClick={onNavigatePublicSite}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-200/80 hover:text-white transition-colors"
+            >
+              <Home className="w-3.5 h-3.5" />
+              Back to the public reporting site
+            </button>
+          </div>
+        )}
+
         {/* Password Reset Modal */}
         {isResetModalOpen && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -703,6 +719,18 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
             </button>
 
             <button
+              onClick={() => setActiveCmsTab('accounts')}
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all ${
+                activeCmsTab === 'accounts'
+                  ? 'bg-[#1B8E44] text-white shadow-sm'
+                  : 'text-emerald-100/80 hover:bg-[#123e20] hover:text-white'
+              }`}
+            >
+              <Users className="w-4 h-4 text-[#F37C1C]" />
+              <span>{isQsaAdmin ? 'User Accounts' : 'My Account'}</span>
+            </button>
+
+            <button
               onClick={() => setActiveCmsTab('settings')}
               className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all ${
                 activeCmsTab === 'settings'
@@ -713,6 +741,18 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
               <Settings className="w-4 h-4 text-[#F37C1C]" />
               <span>CMS Configuration</span>
             </button>
+
+            {onNavigatePublicSite && (
+              <div className="pt-3 mt-3 border-t border-[#164a27]">
+                <button
+                  onClick={onNavigatePublicSite}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all text-emerald-100/80 hover:bg-[#123e20] hover:text-white"
+                >
+                  <Home className="w-4 h-4 text-[#F37C1C]" />
+                  <span>Public Reporting Site</span>
+                </button>
+              </div>
+            )}
           </nav>
         </div>
 
@@ -752,6 +792,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
               {activeCmsTab === 'inbox' && 'Submissions Management'}
               {activeCmsTab === 'analytics' && 'Safety Analytics & Metrics'}
               {activeCmsTab === 'sync' && 'Excel & SharePoint Sync Engine'}
+              {activeCmsTab === 'accounts' && (isQsaAdmin ? 'User Accounts' : 'My Account')}
               {activeCmsTab === 'settings' && 'CMS Policy Settings'}
             </span>
           </div>
@@ -773,6 +814,17 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
                       : 'Firestore read error'}
                 </span>
               </div>
+            )}
+
+            {onNavigatePublicSite && (
+              <button
+                onClick={onNavigatePublicSite}
+                className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 transition-colors flex items-center gap-1.5 text-xs font-bold"
+                title="Go to the public reporting homepage"
+              >
+                <Home className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Homepage</span>
+              </button>
             )}
 
             <button
@@ -1238,6 +1290,14 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
         )}
 
         {/* Tab 5: CMS Configuration */}
+        {activeCmsTab === 'accounts' && (
+          <AccountsPanel
+            currentUid={currentUser?.uid || ''}
+            currentEmail={currentUser?.email || ''}
+            canManage={isQsaAdmin}
+          />
+        )}
+
         {activeCmsTab === 'settings' && (
           <div className="p-4 sm:p-6 space-y-6 max-w-4xl">
             <div>
