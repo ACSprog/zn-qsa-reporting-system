@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "emulators": "firebase emulators:start --project demo-zn-qsa --only auth,firestore --import=./.emulator-data --export-on-exit",
+    "seed:emulators": "node scripts/seed-emulators.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
