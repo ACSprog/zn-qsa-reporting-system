@@ -2,14 +2,21 @@
  * One-command setup of an ONLINE Firebase project for this app (works on the free Spark plan).
  *
  *   npm run setup:firebase -- --email you@example.com --password YourPassword
+ *   npm run setup:firebase -- --email you@example.com --enable-2fa      (login already exists)
  *
  * What it does (safe to re-run; existing things are left as they are):
  *   1. Creates the Firestore database if the project doesn't have one yet
  *   2. Publishes firestore.rules and turns on Email/Password sign-in (firebase deploy)
- *   3. Creates the admin login (or reuses it if the email already exists)
- *   4. Adds that user to the "admins" and "qsaAdmins" collections
+ *   3. Creates the login (or reuses it if the email already exists; password unchanged)
+ *   4. Makes that user a Super Admin (admins/{uid} with role "superadmin")
+ *   5. With --enable-2fa: upgrades the project to Identity Platform (free on Spark, up to
+ *      3,000 daily users), turns on authenticator-app (TOTP) 2FA, and makes it required
+ *      for everyone (settings/security.require2fa = true)
  *
  * Options:
+ *   --password <pw>     Only needed when the login doesn't exist yet
+ *   --enable-2fa        Turn on and require authenticator-app 2FA (see 5.)
+ *   --relax-2fa         Stop requiring 2FA (emergency; users who set it up still use it)
  *   --project <id>      Firebase project ID (default: VITE_FIREBASE_PROJECT_ID from .env.local)
  *   --account <email>   Google account to use (default: the account the Firebase CLI uses in this folder)
  *   --location <loc>    Database location if it has to be created (default: africa-south1). Cannot be changed later.
@@ -17,81 +24,22 @@
  *
  * Needs the Firebase CLI (npm install -g firebase-tools) and `firebase login`.
  */
-import { createRequire } from 'module';
-import { execSync, spawnSync } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
-import path from 'path';
-import readline from 'readline';
+import { spawnSync } from 'child_process';
 
 const DEFAULT_LOCATION = 'africa-south1';
 
-// ---------- helpers ----------
-const ok = (m) => console.log(`\x1b[32m✔\x1b[0m ${m}`);
-const step = (m) => console.log(`\n\x1b[36m▶\x1b[0m ${m}`);
-class SetupError extends Error {}
-// Throw instead of process.exit(): exiting while the readline handle is still closing
-// crashes Node on Windows with "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)".
-function fail(message) {
-  throw new SetupError(message);
-}
-
-function parseArgs(argv) {
-  const args = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (!a.startsWith('--')) continue;
-    const key = a.slice(2);
-    const next = argv[i + 1];
-    if (next === undefined || next.startsWith('--')) args[key] = true;
-    else {
-      args[key] = next;
-      i++;
-    }
-  }
-  return args;
-}
-
-function readEnvLocal(key) {
-  const file = path.join(process.cwd(), '.env.local');
-  if (!existsSync(file)) return '';
-  const line = readFileSync(file, 'utf8')
-    .split(/\r?\n/)
-    .find((l) => l.trim().startsWith(`${key}=`));
-  return line ? line.slice(line.indexOf('=') + 1).trim().replace(/^["']|["']$/g, '') : '';
-}
-
-function ask(question) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => rl.question(question, (a) => { rl.close(); resolve(a.trim()); }));
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function loadFirebaseTools() {
-  const candidates = [];
-  try {
-    candidates.push(path.dirname(createRequire(import.meta.url).resolve('firebase-tools/package.json')));
-  } catch { /* not installed locally */ }
-  try {
-    const globalRoot = execSync('npm root -g', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    candidates.push(path.join(globalRoot, 'firebase-tools'));
-  } catch { /* npm not on PATH */ }
-  const dir = candidates.find((d) => existsSync(path.join(d, 'lib', 'apiv2.js')));
-  if (!dir) fail('Firebase CLI not found. Install it with:  npm install -g firebase-tools');
-  const req = createRequire(path.join(dir, 'package.json'));
-  return {
-    version: req('./package.json').version,
-    auth: req('./lib/auth'),
-    apiv2: req('./lib/apiv2'),
-    requireAuth: req('./lib/requireAuth').requireAuth,
-    ensureApi: req('./lib/ensureApiEnabled').ensure
-  };
-}
-
-function apiError(e) {
-  const ctx = e?.context?.body?.error;
-  return ctx?.message || ctx?.status || e?.message || String(e);
-}
+import {
+  ok,
+  step,
+  SetupError,
+  fail,
+  parseArgs,
+  readEnvLocal,
+  ask,
+  sleep,
+  loadFirebaseTools,
+  apiError
+} from './fb-cli.mjs';
 
 // ---------- main ----------
 async function main() {
@@ -104,7 +52,8 @@ async function main() {
   if (!projectId) fail('No project ID. Put VITE_FIREBASE_PROJECT_ID in .env.local or pass --project <id>.');
   if (projectId.startsWith('demo-')) fail(`"${projectId}" is the local emulator project. Use npm run seed:emulators for that.`);
   if (!email || !email.includes('@')) fail('Give the admin login email:  --email you@example.com');
-  if (password.length < 6) fail('Give a password of at least 6 characters:  --password YourPassword');
+  if (password && password.length < 6) fail('The password must be at least 6 characters.');
+  if (args['enable-2fa'] && args['relax-2fa']) fail('Use either --enable-2fa or --relax-2fa, not both.');
 
   const fbt = loadFirebaseTools();
 
@@ -124,6 +73,9 @@ async function main() {
   console.log(`  Project        : ${projectId}`);
   console.log(`  Admin login    : ${email}`);
   console.log(`  DB location    : ${location} (only used if the database doesn't exist yet)`);
+  console.log(`  Level          : Super Admin`);
+  if (args['enable-2fa']) console.log('  2FA            : turn on authenticator-app 2FA and REQUIRE it for everyone');
+  if (args['relax-2fa']) console.log('  2FA            : stop requiring 2FA');
   console.log(`  Firebase CLI   : v${fbt.version}`);
 
   if (!args.yes) {
@@ -230,10 +182,12 @@ async function main() {
         ok(`Login already exists (password left unchanged). UID: ${uid}`);
         break;
       }
+      if (!password) fail(`There is no login for ${email} yet. Add --password <at least 6 characters> to create it.`);
       const created = await identityApi.post(`/projects/${projectId}/accounts`, { email, password }, userProject);
       uid = created.body.localId;
       ok(`Login created. UID: ${uid}`);
     } catch (e) {
+      if (e instanceof SetupError) throw e;
       const msg = apiError(e);
       if (attempt < 4 && /CONFIGURATION_NOT_FOUND|not found/i.test(msg)) {
         await sleep(5000); // sign-in was just enabled; give it a moment
@@ -245,11 +199,11 @@ async function main() {
   if (!uid) fail('Could not create the login. Wait a minute and run this command again.');
 
   // 4. Admin role documents
-  step('Giving the login admin access...');
-  for (const collection of ['admins', 'qsaAdmins']) {
+  step('Making the login a Super Admin (highest level)...');
+  for (const collection of ['admins']) {
     try {
       await firestoreApi.patch(`${dbPath}/documents/${collection}/${uid}`, {
-        fields: { enabled: { booleanValue: true }, email: { stringValue: email } }
+        fields: { enabled: { booleanValue: true }, email: { stringValue: email }, role: { stringValue: 'superadmin' } }
       });
       ok(`${collection}/${uid}`);
     } catch (e) {
@@ -257,8 +211,55 @@ async function main() {
     }
   }
 
+  // 5. Two-factor authentication
+  const writeRequire2fa = async (value) => {
+    await firestoreApi.patch(`${dbPath}/documents/settings/security`, {
+      fields: { require2fa: { booleanValue: value } }
+    });
+  };
+  if (args['enable-2fa']) {
+    step('Turning on authenticator-app 2FA...');
+    const identityV2 = new fbt.apiv2.Client({ urlPrefix: 'https://identitytoolkit.googleapis.com', apiVersion: 'v2' });
+    const identityAdmin = new fbt.apiv2.Client({ urlPrefix: 'https://identitytoolkit.googleapis.com', apiVersion: 'admin/v2' });
+    try {
+      await identityV2.post(`/projects/${projectId}/identityPlatform:initializeAuth`, {}, userProject);
+      ok('Upgraded to Firebase Authentication with Identity Platform (free on Spark, up to 3,000 daily users).');
+    } catch (e) {
+      const msg = apiError(e);
+      if (/already|ALREADY/.test(msg)) ok('Identity Platform already enabled.');
+      else console.log(`  (Identity Platform upgrade said: ${msg}. Continuing.)`);
+    }
+    try {
+      await identityAdmin.patch(
+        `/projects/${projectId}/config`,
+        { mfa: { providerConfigs: [{ state: 'ENABLED', totpProviderConfig: { adjacentIntervals: 5 } }] } },
+        { ...userProject, queryParams: { updateMask: 'mfa.providerConfigs' } }
+      );
+      ok('Authenticator-app (TOTP) 2FA enabled for this project.');
+    } catch (e) {
+      fail(
+        `Could not enable TOTP 2FA: ${apiError(e)}\n  In the Firebase console open Authentication > Settings and click "Upgrade" to Identity Platform (free on Spark), then run this command again.`
+      );
+    }
+    try {
+      await writeRequire2fa(true);
+      ok('2FA is now REQUIRED: everyone sets it up at their next sign-in.');
+    } catch (e) {
+      fail(`Could not save settings/security: ${apiError(e)}`);
+    }
+  } else if (args['relax-2fa']) {
+    step('Stopping the 2FA requirement...');
+    try {
+      await writeRequire2fa(false);
+      ok('2FA is no longer required. Users who set it up still use it.');
+    } catch (e) {
+      fail(`Could not save settings/security: ${apiError(e)}`);
+    }
+  }
+
   console.log(`\n\x1b[32mAll done.\x1b[0m Start the app with  npm run dev:online  and sign in at http://localhost:3000/admin`);
   console.log(`  Email: ${email}`);
+  if (args['enable-2fa']) console.log('  You will be asked to set up your authenticator app when you sign in.');
 }
 
 main().catch((e) => {

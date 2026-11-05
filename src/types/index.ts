@@ -4,6 +4,23 @@ export type ReportingType = 'Named' | 'Confidential' | 'Anonymous';
 
 export type ReportStatus = 'New' | 'Under review' | 'Action required' | 'Closed';
 
+/** CMS privilege levels (lowest to highest) */
+export type CmsRole = 'viewer' | 'officer' | 'manager' | 'superadmin';
+
+/** Manager and Super Admin share the Manager powers over reports */
+export const isManagerRole = (role: CmsRole | null | undefined) => role === 'manager' || role === 'superadmin';
+
+export interface DeletionRequest {
+  status: 'pending' | 'approved' | 'rejected';
+  requestedBy: string;
+  requestedByEmail: string;
+  requestedAt: any;
+  reason: string;
+  decidedBy?: string;
+  decidedByEmail?: string;
+  decidedAt?: any;
+}
+
 export interface ProcessedEvidenceFile {
   name: string;        // e.g. evidence-1.jpg, evidence-2.pdf
   contentType: string; // e.g. image/jpeg, application/pdf
@@ -40,6 +57,7 @@ export interface BaseReportData {
   deleted: boolean;
   evidenceCount: number;
   evidenceFolder: string;
+  deletionRequest?: DeletionRequest;
   
   // Section 1: Common basic information
   reporting: ReportingType;

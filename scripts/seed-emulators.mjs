@@ -30,16 +30,17 @@ async function setRoleDoc(collection, uid) {
   const res = await fetch(`${FIRESTORE}/${collection}/${uid}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' }, // emulator admin bypass
-    body: JSON.stringify({ fields: { enabled: { booleanValue: true }, email: { stringValue: email } } })
+    body: JSON.stringify({
+      fields: { enabled: { booleanValue: true }, email: { stringValue: email }, role: { stringValue: 'superadmin' } }
+    })
   });
   if (!res.ok) throw new Error(`Could not write ${collection}/${uid}: ${res.status} ${await res.text()}`);
 }
 
 try {
   const uid = await getOrCreateUser();
-  await setRoleDoc('admins', uid);
-  await setRoleDoc('qsaAdmins', uid);
-  console.log(`✔ Admin ready in local emulators\n  Email:    ${email}\n  Password: ${password}\n  UID:      ${uid}`);
+  await setRoleDoc('admins', uid); // role: superadmin (highest level)
+  console.log(`✔ Super Admin login ready in local emulators\n  Email:    ${email}\n  Password: ${password}\n  UID:      ${uid}`);
 } catch (e) {
   const msg = e?.cause?.code === 'ECONNREFUSED' ? 'Emulators are not running. Start them first with: npm run emulators' : e.message;
   console.error(`✘ ${msg}`);

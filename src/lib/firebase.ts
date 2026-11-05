@@ -25,6 +25,9 @@ import {
   sendPasswordResetEmail,
   signOut as fbSignOut,
   onAuthStateChanged,
+  getMultiFactorResolver,
+  TotpMultiFactorGenerator,
+  MultiFactorResolver,
   User
 } from 'firebase/auth';
 import {
@@ -32,7 +35,10 @@ import {
   FormType,
   ProcessedEvidenceFile,
   ReporterIdentity,
-  ReportStatus
+  ReportStatus,
+  CmsRole,
+  DeletionRequest,
+  isManagerRole
 } from '../types';
 import { stripIdentityIfAnonymous, getCategoryForForm } from './idGenerator';
 
@@ -479,7 +485,7 @@ export function subscribeToAllReports(
 export async function updateReportMetadata(
   form: FormType,
   reportId: string,
-  updates: { status?: ReportStatus; notes?: string; deleted?: boolean }
+  updates: { status?: ReportStatus; notes?: string; deleted?: boolean; deletionRequest?: DeletionRequest }
 ): Promise<boolean> {
   if (db) {
     try {
@@ -558,35 +564,112 @@ export async function fetchReportEvidence(
 /**
  * Role Check helper
  */
-export async function verifyUserRoles(user: User | { uid: string; email?: string | null }): Promise<{
+export interface UserRoles {
   isAdmin: boolean;
+  /** Manager or Super Admin: can see reporter identities (kept for existing callers) */
   isQsaAdmin: boolean;
-}> {
-  if (!user) return { isAdmin: false, isQsaAdmin: false };
+  role: CmsRole | null;
+  mustChangePassword: boolean;
+  /** Account exists but a Manager blocked it */
+  blocked: boolean;
+  /** settings/security.require2fa */
+  require2fa: boolean;
+}
+
+const VALID_ROLES: CmsRole[] = ['viewer', 'officer', 'manager', 'superadmin'];
+
+/** Preview mode only: sign in as viewer@..., officer@..., manager@... to try the lower levels */
+function previewRoleFor(email?: string | null): CmsRole {
+  const e = (email || '').toLowerCase();
+  if (e.startsWith('viewer')) return 'viewer';
+  if (e.startsWith('officer')) return 'officer';
+  if (e.startsWith('manager')) return 'manager';
+  return 'superadmin';
+}
+
+export async function verifyUserRoles(user: User | { uid: string; email?: string | null }): Promise<UserRoles> {
+  const none: UserRoles = { isAdmin: false, isQsaAdmin: false, role: null, mustChangePassword: false, blocked: false, require2fa: false };
+  if (!user) return none;
 
   if (db) {
     try {
       const adminDoc = await getDoc(doc(db, 'admins', user.uid));
+      if (!adminDoc.exists()) return none;
+      const data = adminDoc.data() || {};
+      if (data.enabled === false) return { ...none, blocked: true };
       const qsaDoc = await getDoc(doc(db, 'qsaAdmins', user.uid));
+      let require2fa = false;
+      try {
+        const sec = await getDoc(doc(db, 'settings', 'security'));
+        require2fa = sec.exists() && sec.data()?.require2fa === true;
+      } catch {
+        // older rules without settings access: treat as not required
+      }
+      // Stored Super Admin wins; legacy qsaAdmins members are Managers; role-less docs are Officers
+      const stored = data.role as CmsRole | undefined;
+      const role: CmsRole =
+        stored === 'superadmin'
+          ? 'superadmin'
+          : qsaDoc.exists()
+            ? 'manager'
+            : stored && VALID_ROLES.includes(stored)
+              ? stored
+              : 'officer';
       return {
-        isAdmin: adminDoc.exists(),
-        isQsaAdmin: qsaDoc.exists()
+        isAdmin: true,
+        isQsaAdmin: isManagerRole(role),
+        role,
+        mustChangePassword: data.mustChangePassword === true,
+        blocked: false,
+        require2fa
       };
     } catch {
-      return { isAdmin: false, isQsaAdmin: false };
+      return none;
     }
   } else if (import.meta.env.PROD) {
     // Production build without Firebase config: nobody is an admin
-    return { isAdmin: false, isQsaAdmin: false };
+    return none;
   } else {
-    // In-memory or preview role resolution (local development only)
-    const isMockAdmin = inMemoryStore.admins.has(user.uid) || (user.email ? inMemoryStore.admins.has(user.email) : false);
-    const isMockQsa = inMemoryStore.qsaAdmins.has(user.uid) || (user.email ? inMemoryStore.qsaAdmins.has(user.email) : false);
-    return {
-      isAdmin: isMockAdmin || true, // Allow review in mock preview
-      isQsaAdmin: isMockQsa || true
-    };
+    const role = previewRoleFor(user.email);
+    return { isAdmin: true, isQsaAdmin: isManagerRole(role), role, mustChangePassword: false, blocked: false, require2fa: false };
   }
+}
+
+/** Officer: ask a Manager to delete (archive) a report. */
+export async function requestReportDeletion(
+  report: BaseReportData,
+  reason: string,
+  requester: { uid: string; email?: string | null }
+): Promise<{ ok: boolean; error?: string }> {
+  const trimmed = reason.trim();
+  if (!trimmed) return { ok: false, error: 'Please give a reason for the deletion request.' };
+  const request: DeletionRequest = {
+    status: 'pending',
+    requestedBy: requester.uid,
+    requestedByEmail: requester.email || '',
+    requestedAt: db ? serverTimestamp() : new Date().toISOString(),
+    reason: trimmed.slice(0, 1000)
+  };
+  const ok = await updateReportMetadata(report.form, report.reportId, { deletionRequest: request });
+  return ok ? { ok } : { ok, error: 'Could not send the request. You may not have permission, or a request is already pending.' };
+}
+
+/** Manager: approve (archives the report) or reject a pending deletion request. */
+export async function decideDeletionRequest(
+  report: BaseReportData,
+  approve: boolean,
+  manager: { uid: string; email?: string | null }
+): Promise<boolean> {
+  const current = report.deletionRequest;
+  if (!current || current.status !== 'pending') return false;
+  const decided: DeletionRequest = {
+    ...current,
+    status: approve ? 'approved' : 'rejected',
+    decidedBy: manager.uid,
+    decidedByEmail: manager.email || '',
+    decidedAt: db ? serverTimestamp() : new Date().toISOString()
+  };
+  return updateReportMetadata(report.form, report.reportId, approve ? { deletionRequest: decided, deleted: true } : { deletionRequest: decided });
 }
 
 // In-memory mock session handlers for local preview mode
@@ -599,7 +682,7 @@ const mockAuthListeners: Array<(user: any) => void> = [];
 export async function signInWithEmail(
   email: string,
   password: string
-): Promise<{ user: User | any | null; error?: string }> {
+): Promise<{ user: User | any | null; error?: string; mfaResolver?: MultiFactorResolver }> {
   const cleanEmail = email.trim().toLowerCase();
   if (!cleanEmail || !password) {
     return { user: null, error: 'Please enter both your email address and password.' };
@@ -610,6 +693,10 @@ export async function signInWithEmail(
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
       return { user: cred.user };
     } catch (err: any) {
+      // Password was right; now the authenticator-app code is needed
+      if (err?.code === 'auth/multi-factor-auth-required') {
+        return { user: null, mfaResolver: getMultiFactorResolver(auth, err) };
+      }
       let message = 'Invalid email or password. Please verify your credentials.';
       if (
         err.code === 'auth/user-not-found' ||
@@ -635,7 +722,7 @@ export async function signInWithEmail(
     mockUser = {
       uid: fakeUid,
       email: cleanEmail,
-      displayName: cleanEmail.split('@')[0].toUpperCase() + ' (Safety Officer)'
+      displayName: cleanEmail.split('@')[0].toUpperCase()
     };
     inMemoryStore.admins.add(fakeUid);
     inMemoryStore.admins.add(cleanEmail);
@@ -643,6 +730,28 @@ export async function signInWithEmail(
     inMemoryStore.qsaAdmins.add(cleanEmail);
     mockAuthListeners.forEach((cb) => cb(mockUser));
     return { user: mockUser };
+  }
+}
+
+/** Second sign-in step: the 6-digit code from the authenticator app. */
+export async function completeMfaSignIn(
+  resolver: MultiFactorResolver,
+  code: string
+): Promise<{ user: User | null; error?: string }> {
+  const hint = resolver.hints.find((h) => h.factorId === TotpMultiFactorGenerator.FACTOR_ID);
+  if (!hint) return { user: null, error: 'No authenticator app is set up for this account. Contact a Super Admin.' };
+  try {
+    const assertion = TotpMultiFactorGenerator.assertionForSignIn(hint.uid, code.replace(/\s/g, ''));
+    const cred = await resolver.resolveSignIn(assertion);
+    return { user: cred.user };
+  } catch (err: any) {
+    if (err?.code === 'auth/invalid-verification-code' || err?.code === 'auth/totp-challenge-timeout') {
+      return { user: null, error: 'That code is not right or has expired. Enter the current 6-digit code from your app.' };
+    }
+    if (err?.code === 'auth/too-many-requests') {
+      return { user: null, error: 'Too many attempts. Wait a few minutes and try again.' };
+    }
+    return { user: null, error: err?.message || 'Could not verify the code.' };
   }
 }
 

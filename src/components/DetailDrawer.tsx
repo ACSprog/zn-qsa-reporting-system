@@ -19,20 +19,26 @@ import {
   Loader2,
   Save,
   Eye,
-  RefreshCw
+  RefreshCw,
+  Trash2,
+  XCircle
 } from 'lucide-react';
 import {
   BaseReportData,
   ProcessedEvidenceFile,
   ReporterIdentity,
-  ReportStatus
+  ReportStatus,
+  CmsRole,
+  isManagerRole
 } from '../types';
 import { FORMS_META, getFormFields } from '../config/fields';
 import { STATUS_OPTIONS } from '../config/options';
 import {
   fetchReportEvidence,
   fetchReporterIdentity,
-  updateReportMetadata
+  updateReportMetadata,
+  requestReportDeletion,
+  decideDeletionRequest
 } from '../lib/firebase';
 import { triggerFileDownload } from '../lib/evidence';
 import { restoreReportToExcel } from '../lib/restoreToExcel';
@@ -42,14 +48,32 @@ interface DetailDrawerProps {
   onClose: () => void;
   onReportUpdated: () => void;
   isQsaAdmin: boolean;
+  /** viewer: read only; officer: edit + request deletion; manager: approve/archive/restore */
+  role: CmsRole;
+  currentUser: { uid: string; email?: string | null } | null;
+}
+
+function formatWhen(v: any): string {
+  if (!v) return '';
+  const d = typeof v?.toDate === 'function' ? v.toDate() : new Date(v);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString();
 }
 
 export const DetailDrawer: React.FC<DetailDrawerProps> = ({
   report,
   onClose,
   onReportUpdated,
-  isQsaAdmin
+  isQsaAdmin,
+  role,
+  currentUser
 }) => {
+  const isManager = isManagerRole(role);
+  const canEdit = isManager || role === 'officer';
+
+  const [showDeleteForm, setShowDeleteForm] = useState<boolean>(false);
+  const [deleteReason, setDeleteReason] = useState<string>('');
+  const [deletionBusy, setDeletionBusy] = useState<boolean>(false);
+  const [deletionMessage, setDeletionMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [evidenceFiles, setEvidenceFiles] = useState<ProcessedEvidenceFile[]>([]);
   const [loadingEvidence, setLoadingEvidence] = useState<boolean>(false);
 
@@ -74,6 +98,9 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
     setCurrentNotes(report.notes || '');
     setSaveSuccess(false);
     setSyncMessage(null);
+    setShowDeleteForm(false);
+    setDeleteReason('');
+    setDeletionMessage(null);
 
     // 1. Load evidence subcollection on drawer open ONLY (per spec)
     if (report.evidenceCount > 0) {
@@ -145,14 +172,74 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
     }
   };
 
+  const pendingRequest = report.deletionRequest?.status === 'pending' ? report.deletionRequest : null;
+
+  // Manager only: archive or restore directly
   const handleToggleArchive = async () => {
     const nextDeleted = !report.deleted;
+    if (
+      !window.confirm(
+        nextDeleted
+          ? `Archive ${report.reportId}? It will be hidden from the inbox but kept, and can be restored.`
+          : `Restore ${report.reportId} to the inbox?`
+      )
+    )
+      return;
     const ok = await updateReportMetadata(report.form, report.reportId, {
       deleted: nextDeleted
     });
     if (ok) {
       onReportUpdated();
       onClose();
+    } else {
+      setDeletionMessage({ kind: 'error', text: 'Could not update the report. You may not have permission.' });
+    }
+  };
+
+  // Officer: ask a Manager to delete
+  const handleRequestDeletion = async () => {
+    if (!currentUser) return;
+    setDeletionBusy(true);
+    setDeletionMessage(null);
+    try {
+      const res = await requestReportDeletion(report, deleteReason, currentUser);
+      if (res.ok) {
+        setShowDeleteForm(false);
+        setDeleteReason('');
+        setDeletionMessage({ kind: 'ok', text: 'Deletion request sent. A Manager must approve it before the report is removed.' });
+        onReportUpdated();
+      } else {
+        setDeletionMessage({ kind: 'error', text: res.error || 'Could not send the request.' });
+      }
+    } finally {
+      setDeletionBusy(false);
+    }
+  };
+
+  // Manager: approve (archive) or reject
+  const handleDecide = async (approve: boolean) => {
+    if (!currentUser) return;
+    if (
+      !window.confirm(
+        approve
+          ? `Approve deletion of ${report.reportId}? It will be archived (hidden from the inbox, restorable by a Manager).`
+          : `Reject the deletion request for ${report.reportId}? The report stays in the inbox.`
+      )
+    )
+      return;
+    setDeletionBusy(true);
+    setDeletionMessage(null);
+    try {
+      const ok = await decideDeletionRequest(report, approve, currentUser);
+      if (ok) {
+        onReportUpdated();
+        if (approve) onClose();
+        else setDeletionMessage({ kind: 'ok', text: 'Deletion request rejected.' });
+      } else {
+        setDeletionMessage({ kind: 'error', text: 'Could not save the decision. You may not have permission.' });
+      }
+    } finally {
+      setDeletionBusy(false);
     }
   };
 
@@ -192,6 +279,74 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
 
         {/* Drawer Body Scroll Area */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* Deletion request / decision */}
+          {pendingRequest && (
+            <div className="border border-rose-200 bg-rose-50 rounded-xl p-4 space-y-2">
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-rose-800">
+                <Trash2 className="w-4 h-4" /> Deletion requested
+              </div>
+              <p className="text-xs text-rose-900">
+                <strong>{pendingRequest.requestedByEmail || pendingRequest.requestedBy}</strong>
+                {formatWhen(pendingRequest.requestedAt) && <> on {formatWhen(pendingRequest.requestedAt)}</>}
+              </p>
+              <p className="text-xs text-rose-900 whitespace-pre-wrap bg-white/70 border border-rose-100 rounded-lg p-2.5">
+                {pendingRequest.reason}
+              </p>
+              {isManager ? (
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={deletionBusy}
+                    onClick={() => handleDecide(true)}
+                    className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    {deletionBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                    Approve &amp; archive
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deletionBusy}
+                    onClick={() => handleDecide(false)}
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <XCircle className="w-3.5 h-3.5" /> Reject
+                  </button>
+                </div>
+              ) : (
+                <p className="text-[11px] text-rose-700">Awaiting a Manager's approval.</p>
+              )}
+            </div>
+          )}
+
+          {!pendingRequest && report.deletionRequest?.status === 'rejected' && (
+            <div className="border border-slate-200 bg-slate-50 rounded-xl p-3 text-[11px] text-slate-600">
+              A deletion request by {report.deletionRequest.requestedByEmail || 'an officer'} was rejected by{' '}
+              {report.deletionRequest.decidedByEmail || 'a Manager'}
+              {formatWhen(report.deletionRequest.decidedAt) && <> on {formatWhen(report.deletionRequest.decidedAt)}</>}.
+            </div>
+          )}
+
+          {report.deleted && report.deletionRequest?.status === 'approved' && (
+            <div className="border border-slate-200 bg-slate-50 rounded-xl p-3 text-[11px] text-slate-600">
+              Archived after a deletion request by {report.deletionRequest.requestedByEmail || 'an officer'}, approved by{' '}
+              {report.deletionRequest.decidedByEmail || 'a Manager'}
+              {formatWhen(report.deletionRequest.decidedAt) && <> on {formatWhen(report.deletionRequest.decidedAt)}</>}.
+              Reason: {report.deletionRequest.reason}
+            </div>
+          )}
+
+          {deletionMessage && (
+            <div
+              className={`p-3 rounded-xl text-xs border ${
+                deletionMessage.kind === 'ok'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-rose-50 border-rose-200 text-rose-800'
+              }`}
+            >
+              {deletionMessage.text}
+            </div>
+          )}
+
           {/* Status & Review Controls */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
@@ -212,8 +367,9 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
                 </label>
                 <select
                   value={currentStatus}
+                  disabled={!canEdit}
                   onChange={(e) => setCurrentStatus(e.target.value as ReportStatus)}
-                  className="w-full text-sm font-semibold bg-white border border-slate-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500"
+                  className="disabled:opacity-70 disabled:cursor-not-allowed w-full text-sm font-semibold bg-white border border-slate-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500"
                 >
                   {STATUS_OPTIONS.map((st) => (
                     <option key={st} value={st}>
@@ -224,6 +380,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
               </div>
 
               <div className="flex items-end">
+                {canEdit ? (
                 <button
                   type="button"
                   disabled={isSaving}
@@ -233,6 +390,11 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
                   {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                   <span>Save Review Updates</span>
                 </button>
+                ) : (
+                  <span className="text-[11px] text-slate-500 flex items-center gap-1.5 pb-2">
+                    <Eye className="w-3.5 h-3.5" /> View-only access
+                  </span>
+                )}
               </div>
             </div>
 
@@ -242,6 +404,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
               </label>
               <textarea
                 rows={2}
+                readOnly={!canEdit}
                 value={currentNotes}
                 onChange={(e) => setCurrentNotes(e.target.value)}
                 placeholder="Enter investigation notes, assigned action items or safety board references..."
@@ -473,6 +636,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
         </div>
 
         {/* Sync to Excel */}
+        {canEdit && (
         <div className="px-4 py-3 border-t border-slate-200 bg-white shrink-0 flex items-center justify-between gap-3">
           <p className="text-[11px] text-slate-500 leading-snug">
             {syncMessage ??
@@ -492,26 +656,76 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
             <span>Sync to Excel</span>
           </button>
         </div>
+        )}
 
         {/* Drawer Footer Actions */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
-          <button
-            type="button"
-            onClick={handleToggleArchive}
-            className="text-xs font-semibold px-3 py-1.5 rounded border border-slate-300 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1.5"
-          >
-            {report.deleted ? (
-              <>
-                <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Restore from Archive</span>
-              </>
-            ) : (
-              <>
-                <Archive className="w-3.5 h-3.5 text-amber-600" />
-                <span>Archive Report</span>
-              </>
+          <div className="flex-1 mr-3">
+            {isManager && !pendingRequest && (
+              <button
+                type="button"
+                onClick={handleToggleArchive}
+                className="text-xs font-semibold px-3 py-1.5 rounded border border-slate-300 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1.5"
+              >
+                {report.deleted ? (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Restore from Archive</span>
+                  </>
+                ) : (
+                  <>
+                    <Archive className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Archive Report</span>
+                  </>
+                )}
+              </button>
             )}
-          </button>
+
+            {role === 'officer' && !report.deleted && !pendingRequest && !showDeleteForm && (
+              <button
+                type="button"
+                onClick={() => setShowDeleteForm(true)}
+                className="text-xs font-semibold px-3 py-1.5 rounded border border-rose-200 text-rose-700 hover:bg-rose-50 transition-colors flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Request Deletion</span>
+              </button>
+            )}
+
+            {role === 'officer' && showDeleteForm && (
+              <div className="space-y-2">
+                <textarea
+                  rows={2}
+                  maxLength={1000}
+                  value={deleteReason}
+                  onChange={(e) => setDeleteReason(e.target.value)}
+                  placeholder="Why should this report be deleted? (e.g. duplicate of HAZ-..., test submission)"
+                  className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-rose-400"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={deletionBusy || !deleteReason.trim()}
+                    onClick={handleRequestDeletion}
+                    className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    {deletionBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    Send for approval
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDeleteForm(false);
+                      setDeleteReason('');
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-slate-600 hover:bg-slate-100 text-xs font-bold"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           <button
             type="button"
