@@ -66,6 +66,17 @@ npm run dev
 - Data is saved to `.emulator-data/` when you stop the emulators with Ctrl+C. Delete that folder to start fresh.
 - The emulators use the project ID `demo-zn-qsa`, so nothing can reach a real Firebase project. `VITE_USE_FIREBASE_EMULATORS` is ignored in production builds.
 
+### Running Local and Online Side by Side
+Keep your online (development) Firebase project's `VITE_FIREBASE_*` values in `.env.local`, then pick a backend per command. Both can run at the same time:
+
+| Command | Backend | URL |
+|---|---|---|
+| `npm run dev:online` | Online Firebase project from `.env.local` | http://localhost:3000 |
+| `npm run dev:local` | Local emulators (run `npm run emulators` first) | http://localhost:3001 |
+| `npm run dev` | Whatever `.env.local` says | http://localhost:3000 |
+
+The dashboard badge shows which one you are on ("Online Firestore Connected" or "Local emulators"). The two keep separate data and separate logins.
+
 ### Production Build & Firebase Deployment
 ```bash
 # Build production bundle

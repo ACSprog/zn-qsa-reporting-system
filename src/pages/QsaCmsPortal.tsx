@@ -46,7 +46,8 @@ import {
   fetchReporterIdentity,
   subscribeToAllReports,
   backendMode,
-  clearPreviewReports
+  clearPreviewReports,
+  usingEmulators
 } from '../lib/firebase';
 import { DetailDrawer } from '../components/DetailDrawer';
 import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
@@ -759,7 +760,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
             {backendMode === 'firestore' && !reportsError ? (
               <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Firestore Master Connected (live)</span>
+                <span>{usingEmulators ? 'Local emulators (live)' : 'Online Firestore Connected (live)'}</span>
               </div>
             ) : (
               <div className="hidden sm:flex items-center gap-1.5 text-xs text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
