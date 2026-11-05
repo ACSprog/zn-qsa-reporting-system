@@ -146,8 +146,10 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     e.preventDefault();
     setSubmitError(null);
 
-    // Bot trap check: if honeypot filled, silently pretend success
-    if (honeypot) {
+    // Bot trap check: if honeypot filled, silently pretend success.
+    // Logged so a real user hit by browser autofill can be diagnosed from the console.
+    if (honeypot.trim()) {
+      console.warn('[SafetyReport] Bot-trap field was filled; report was NOT saved.');
       onSuccess(reportId, reporting);
       return;
     }
@@ -252,15 +254,22 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
         <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-10">
           {/* Honeypot field */}
-          <div className="opacity-0 absolute -left-[9999px]" aria-hidden="true" tabIndex={-1}>
+          {/* Name and autocomplete chosen so browser/password-manager autofill never fills it
+              (the old name contained "company", which Chrome autofills from saved addresses). */}
+          <div className="opacity-0 absolute -left-[9999px]" aria-hidden="true">
             <label htmlFor={honeypotId}>Leave this field blank</label>
             <input
               id={honeypotId}
               type="text"
-              name="company_title_verification"
+              name="za_hp_check"
               value={honeypot}
               onChange={(e) => setHoneypot(e.target.value)}
-              autoComplete="off"
+              autoComplete="one-time-code"
+              tabIndex={-1}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
+              data-form-type="other"
             />
           </div>
 

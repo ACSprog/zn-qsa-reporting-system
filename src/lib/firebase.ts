@@ -13,6 +13,7 @@ import {
   orderBy,
   writeBatch,
   serverTimestamp,
+  onSnapshot,
   DocumentData
 } from 'firebase/firestore';
 import {
@@ -71,6 +72,19 @@ const inMemoryStore = {
   admins: new Set<string>(['admin-demo-user', 'zambiaiarwaysltd@gmail.com', 'admin@zambiaairways.co.zm']),
   qsaAdmins: new Set<string>(['qsa-demo-user', 'zambiaiarwaysltd@gmail.com', 'admin@zambiaairways.co.zm'])
 };
+
+// Listeners for the in-memory store, so the dashboard updates live in preview mode too
+const inMemoryReportListeners = new Set<() => void>();
+function notifyInMemoryReportListeners() {
+  inMemoryReportListeners.forEach((cb) => cb());
+}
+
+/**
+ * Where reports are actually being stored.
+ * 'firestore' = real database. 'memory' = local preview only: reports live in this
+ * browser tab and disappear on reload, and are never visible from another tab or device.
+ */
+export const backendMode: 'firestore' | 'memory' = db ? 'firestore' : 'memory';
 
 /**
  * Submits a safety report atomically with evidence documents and optional identity
@@ -179,6 +193,7 @@ export async function submitSafetyReport(
     }
 
     inMemoryStore.evidence.set(reportId, [...evidenceFiles]);
+    notifyInMemoryReportListeners();
   }
 
   // 4. Send to Power Automate HTTP trigger (non-blocking, mode: 'no-cors')
@@ -261,16 +276,38 @@ export function dispatchPowerAutomateFlow(
   return true;
 }
 
+const ALL_FORMS: FormType[] = ['hazard', 'incident', 'accident', 'concern'];
+
+function sortNewestFirst(list: BaseReportData[]): BaseReportData[] {
+  const toMillis = (v: any): number => {
+    if (!v) return Number.MAX_SAFE_INTEGER; // pending server timestamp = just created
+    if (typeof v.toMillis === 'function') return v.toMillis();
+    if (v instanceof Date) return v.getTime();
+    const n = new Date(v).getTime();
+    return Number.isNaN(n) ? 0 : n;
+  };
+  return [...list].sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+}
+
+function describeFirestoreError(form: FormType, e: any): string {
+  const code = e?.code || '';
+  if (code === 'permission-denied') {
+    return `Permission denied reading "${form}" reports. Check that your account has a document in the "admins" collection and that the latest firestore.rules are deployed.`;
+  }
+  return `Could not load "${form}" reports: ${e?.message || e}`;
+}
+
 /**
- * Fetch all reports across forms for Admin Dashboard
+ * Fetch all reports across forms for Admin Dashboard.
+ * Throws if any collection could not be read, so the dashboard can show why
+ * instead of silently displaying an empty or partial list.
  */
 export async function fetchAllReports(formFilter?: FormType): Promise<BaseReportData[]> {
-  const formsToFetch: FormType[] = formFilter
-    ? [formFilter]
-    : ['hazard', 'incident', 'accident', 'concern'];
+  const formsToFetch: FormType[] = formFilter ? [formFilter] : ALL_FORMS;
 
   if (db) {
     const results: BaseReportData[] = [];
+    const errors: string[] = [];
     for (const f of formsToFetch) {
       try {
         const colRef = collection(db, f);
@@ -281,17 +318,64 @@ export async function fetchAllReports(formFilter?: FormType): Promise<BaseReport
         });
       } catch (e) {
         console.error(`Error querying ${f}:`, e);
+        errors.push(describeFirestoreError(f, e));
       }
     }
-    return results;
+    if (errors.length) {
+      throw new Error(errors.join(' '));
+    }
+    return sortNewestFirst(results);
   } else {
     // In-memory fallback
     const list = Array.from(inMemoryStore.reports.values());
-    if (formFilter) {
-      return list.filter((r) => r.form === formFilter);
-    }
-    return list;
+    return sortNewestFirst(formFilter ? list.filter((r) => r.form === formFilter) : list);
   }
+}
+
+/**
+ * Live subscription to all report collections. The callback fires immediately
+ * with the current data and again whenever a report is created or changed,
+ * so new submissions appear on the dashboard without a manual refresh.
+ * Returns an unsubscribe function.
+ */
+export function subscribeToAllReports(
+  onData: (reports: BaseReportData[]) => void,
+  onError: (message: string) => void
+): () => void {
+  if (db) {
+    const perForm = new Map<FormType, BaseReportData[]>();
+    const emit = () => {
+      // Wait until every collection has delivered its first snapshot
+      if (perForm.size < ALL_FORMS.length) return;
+      onData(sortNewestFirst(ALL_FORMS.flatMap((f) => perForm.get(f) || [])));
+    };
+    const unsubs = ALL_FORMS.map((f) =>
+      onSnapshot(
+        query(collection(db!, f), orderBy('createdAt', 'desc')),
+        (snap) => {
+          perForm.set(
+            f,
+            snap.docs.map((d) => ({ ...(d.data({ serverTimestamps: 'estimate' }) as BaseReportData), reportId: d.id, form: f }))
+          );
+          emit();
+        },
+        (e) => {
+          console.error(`Live listener for ${f} failed:`, e);
+          perForm.set(f, []);
+          onError(describeFirestoreError(f, e));
+          emit();
+        }
+      )
+    );
+    return () => unsubs.forEach((u) => u());
+  }
+
+  const push = () => onData(sortNewestFirst(Array.from(inMemoryStore.reports.values())));
+  inMemoryReportListeners.add(push);
+  push();
+  return () => {
+    inMemoryReportListeners.delete(push);
+  };
 }
 
 /**
@@ -315,6 +399,7 @@ export async function updateReportMetadata(
     const rep = inMemoryStore.reports.get(reportId);
     if (rep) {
       inMemoryStore.reports.set(reportId, { ...rep, ...updates });
+      notifyInMemoryReportListeners();
       return true;
     }
     return false;

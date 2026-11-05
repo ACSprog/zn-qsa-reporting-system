@@ -44,7 +44,8 @@ import {
   subscribeToAuthState,
   verifyUserRoles,
   fetchReporterIdentity,
-  isFirebaseConfigured
+  subscribeToAllReports,
+  backendMode
 } from '../lib/firebase';
 import { DetailDrawer } from '../components/DetailDrawer';
 import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
@@ -70,6 +71,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
   // Reports data state
   const [reports, setReports] = useState<BaseReportData[]>([]);
   const [loadingReports, setLoadingReports] = useState<boolean>(false);
+  const [reportsError, setReportsError] = useState<string | null>(null);
   const [selectedReport, setSelectedReport] = useState<BaseReportData | null>(null);
 
   // Submissions Inbox Filters
@@ -137,25 +139,46 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
     return () => unsubscribe();
   }, []);
 
-  // Fetch reports from Firestore
+  // Manual refresh (live listener below normally keeps data current)
   const loadReports = async () => {
     if (!isAdmin) return;
     setLoadingReports(true);
     try {
       const data = await fetchAllReports();
       setReports(data);
+      setReportsError(null);
     } catch (err: any) {
       console.error('Failed to load reports in CMS:', err);
+      setReportsError(err?.message || 'Failed to load reports.');
     } finally {
       setLoadingReports(false);
     }
   };
 
+  // Live subscription: new submissions appear without pressing Refresh
   useEffect(() => {
-    if (isAdmin) {
-      loadReports();
-    }
+    if (!isAdmin) return;
+    setLoadingReports(true);
+    const unsubscribe = subscribeToAllReports(
+      (data) => {
+        setReports(data);
+        setLoadingReports(false);
+      },
+      (message) => {
+        setReportsError(message);
+        setLoadingReports(false);
+      }
+    );
+    return () => unsubscribe();
   }, [isAdmin]);
+
+  // Keep the open detail drawer in sync with live data
+  useEffect(() => {
+    setSelectedReport((current) => {
+      if (!current) return current;
+      return reports.find((r) => r.reportId === current.reportId && r.form === current.form) || current;
+    });
+  }, [reports]);
 
   const handleEmailPasswordSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -732,10 +755,17 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Firestore Master Connected</span>
-            </div>
+            {backendMode === 'firestore' && !reportsError ? (
+              <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Firestore Master Connected (live)</span>
+              </div>
+            ) : (
+              <div className="hidden sm:flex items-center gap-1.5 text-xs text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
+                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                <span>{backendMode === 'memory' ? 'Preview mode: not connected to Firestore' : 'Firestore read error'}</span>
+              </div>
+            )}
 
             <button
               onClick={loadReports}
@@ -751,6 +781,22 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
         {/* Tab 1: Submissions Inbox */}
         {activeCmsTab === 'inbox' && (
           <div className="p-4 sm:p-6 space-y-6">
+            {backendMode === 'memory' && (
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span>
+                  <strong>Preview mode — Firebase is not configured.</strong> Reports are only kept in this browser tab
+                  and are lost on reload. Submissions made in another tab, browser or device will not appear here.
+                  Set the <code>VITE_FIREBASE_*</code> variables (see <code>.env.example</code>) and restart the app to use the real database.
+                </span>
+              </div>
+            )}
+            {reportsError && (
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span><strong>Some reports could not be loaded.</strong> {reportsError}</span>
+              </div>
+            )}
             {/* Quick Metrics Bar */}
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
               <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
@@ -1212,11 +1258,8 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
         report={selectedReport}
         onClose={() => setSelectedReport(null)}
         onReportUpdated={() => {
+          // The live listener refreshes the list and the open drawer automatically
           loadReports();
-          if (selectedReport) {
-            const updated = reports.find((r) => r.reportId === selectedReport.reportId);
-            if (updated) setSelectedReport(updated);
-          }
         }}
         isQsaAdmin={isQsaAdmin}
       />
