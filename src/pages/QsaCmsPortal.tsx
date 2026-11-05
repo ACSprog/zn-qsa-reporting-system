@@ -45,7 +45,8 @@ import {
   verifyUserRoles,
   fetchReporterIdentity,
   subscribeToAllReports,
-  backendMode
+  backendMode,
+  clearPreviewReports
 } from '../lib/firebase';
 import { DetailDrawer } from '../components/DetailDrawer';
 import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
@@ -763,7 +764,13 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
             ) : (
               <div className="hidden sm:flex items-center gap-1.5 text-xs text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
                 <span className="w-2 h-2 rounded-full bg-amber-500" />
-                <span>{backendMode === 'memory' ? 'Preview mode: not connected to Firestore' : 'Firestore read error'}</span>
+                <span>
+                  {backendMode === 'local'
+                    ? 'Preview mode: saved in this browser'
+                    : backendMode === 'memory'
+                      ? 'Preview mode: not connected to Firestore'
+                      : 'Firestore read error'}
+                </span>
               </div>
             )}
 
@@ -781,6 +788,25 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = () => {
         {/* Tab 1: Submissions Inbox */}
         {activeCmsTab === 'inbox' && (
           <div className="p-4 sm:p-6 space-y-6">
+            {backendMode === 'local' && (
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span className="flex-1">
+                  <strong>Preview mode — saved in this browser only.</strong> Reports submitted from any tab of this
+                  browser on this computer appear here and survive reloads. Reports from other browsers or devices
+                  will not. Connect Firebase (<code>VITE_FIREBASE_*</code> in <code>.env.local</code>) for real use.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('Delete all preview reports saved in this browser?')) clearPreviewReports();
+                  }}
+                  className="shrink-0 text-[11px] font-bold text-amber-900 border border-amber-300 hover:bg-amber-100 px-2 py-1 rounded-md"
+                >
+                  Clear test data
+                </button>
+              </div>
+            )}
             {backendMode === 'memory' && (
               <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />

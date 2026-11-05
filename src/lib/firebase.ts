@@ -63,8 +63,10 @@ if (isFirebaseConfigured) {
   }
 }
 
-// In-Memory fallback store for preview / local testing before Firebase config is set
-// NOTE: Per guidelines, localStorage is NOT used for report data.
+// Fallback store for preview / local testing before Firebase config is set.
+// In development builds only, it is mirrored to this browser's localStorage so reports
+// survive reloads and are shared between tabs. Production builds never use localStorage
+// for report data (submissions fail loudly instead, see submitSafetyReport).
 const inMemoryStore = {
   reports: new Map<string, BaseReportData>(),
   identities: new Map<string, ReporterIdentity>(),
@@ -79,12 +81,81 @@ function notifyInMemoryReportListeners() {
   inMemoryReportListeners.forEach((cb) => cb());
 }
 
+const PREVIEW_STORAGE_KEY = 'za_preview_store_v1';
+const usePreviewLocalStorage =
+  !db && import.meta.env.DEV && typeof window !== 'undefined' && (() => {
+    try {
+      return Boolean(window.localStorage);
+    } catch {
+      return false;
+    }
+  })();
+
+function loadPreviewStore() {
+  if (!usePreviewLocalStorage) return;
+  try {
+    const raw = window.localStorage.getItem(PREVIEW_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    inMemoryStore.reports = new Map(Object.entries(parsed.reports || {}));
+    inMemoryStore.identities = new Map(Object.entries(parsed.identities || {}));
+    inMemoryStore.evidence = new Map(Object.entries(parsed.evidence || {}));
+  } catch (e) {
+    console.warn('[Preview] Could not read saved preview reports:', e);
+  }
+}
+
+function savePreviewStore() {
+  if (!usePreviewLocalStorage) return;
+  const snapshot = (withEvidence: boolean) =>
+    JSON.stringify({
+      reports: Object.fromEntries(inMemoryStore.reports),
+      identities: Object.fromEntries(inMemoryStore.identities),
+      evidence: withEvidence ? Object.fromEntries(inMemoryStore.evidence) : {}
+    });
+  try {
+    window.localStorage.setItem(PREVIEW_STORAGE_KEY, snapshot(true));
+  } catch {
+    // Browser storage is ~5 MB; photo attachments can exceed it. Keep the reports, drop the files.
+    try {
+      window.localStorage.setItem(PREVIEW_STORAGE_KEY, snapshot(false));
+      console.warn('[Preview] Browser storage full: attachments are kept for this tab only.');
+    } catch (e) {
+      console.warn('[Preview] Could not save preview reports to browser storage:', e);
+    }
+  }
+}
+
+if (usePreviewLocalStorage) {
+  loadPreviewStore();
+  // Another tab submitted or updated a report: reload and refresh the dashboard
+  window.addEventListener('storage', (e) => {
+    if (e.key === PREVIEW_STORAGE_KEY) {
+      loadPreviewStore();
+      notifyInMemoryReportListeners();
+    }
+  });
+}
+
+/** Clears all preview reports saved in this browser (development only). */
+export function clearPreviewReports() {
+  inMemoryStore.reports.clear();
+  inMemoryStore.identities.clear();
+  inMemoryStore.evidence.clear();
+  if (usePreviewLocalStorage) window.localStorage.removeItem(PREVIEW_STORAGE_KEY);
+  notifyInMemoryReportListeners();
+}
+
 /**
  * Where reports are actually being stored.
- * 'firestore' = real database. 'memory' = local preview only: reports live in this
- * browser tab and disappear on reload, and are never visible from another tab or device.
+ * 'firestore' = real database.
+ * 'local'     = development preview: saved in this browser only (shared between its tabs).
+ * 'memory'    = preview with no browser storage: lost on reload.
  */
-export const backendMode: 'firestore' | 'memory' = db ? 'firestore' : 'memory';
+export const backendMode: 'firestore' | 'local' | 'memory' = db
+  ? 'firestore'
+  : usePreviewLocalStorage
+    ? 'local'
+    : 'memory';
 
 /**
  * Submits a safety report atomically with evidence documents and optional identity
@@ -193,6 +264,7 @@ export async function submitSafetyReport(
     }
 
     inMemoryStore.evidence.set(reportId, [...evidenceFiles]);
+    savePreviewStore();
     notifyInMemoryReportListeners();
   }
 
@@ -399,6 +471,7 @@ export async function updateReportMetadata(
     const rep = inMemoryStore.reports.get(reportId);
     if (rep) {
       inMemoryStore.reports.set(reportId, { ...rep, ...updates });
+      savePreviewStore();
       notifyInMemoryReportListeners();
       return true;
     }
