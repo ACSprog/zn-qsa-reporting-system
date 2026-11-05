@@ -12,7 +12,8 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "emulators": "firebase emulators:start --project demo-zn-qsa --only auth,firestore --import=./.emulator-data --export-on-exit",
-    "seed:emulators": "node scripts/seed-emulators.mjs"
+    "seed:emulators": "node scripts/seed-emulators.mjs",
+    "setup:firebase": "node scripts/setup-firebase.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
