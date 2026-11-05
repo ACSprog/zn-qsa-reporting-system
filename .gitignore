@@ -6,6 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+# Mode files hold no secrets, only which backend to use
+!.env.online
+!.env.emulator
 
 # Firebase emulator local data and logs
 .emulator-data/
