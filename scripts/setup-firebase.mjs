@@ -17,6 +17,8 @@
  *   --password <pw>     Only needed when the login doesn't exist yet
  *   --enable-2fa        Turn on and require authenticator-app 2FA (see 5.)
  *   --relax-2fa         Stop requiring 2FA (emergency; users who set it up still use it)
+ *   --action-url <url>  Send password-reset / verification links to the app's own branded page,
+ *                       e.g. https://zn-qsa-reporting-system-test.web.app (adds /auth/action)
  *   --project <id>      Firebase project ID (default: VITE_FIREBASE_PROJECT_ID from .env.local)
  *   --account <email>   Google account to use (default: the account the Firebase CLI uses in this folder)
  *   --location <loc>    Database location if it has to be created (default: africa-south1). Cannot be changed later.
@@ -54,6 +56,13 @@ async function main() {
   if (!email || !email.includes('@')) fail('Give the admin login email:  --email you@example.com');
   if (password && password.length < 6) fail('The password must be at least 6 characters.');
   if (args['enable-2fa'] && args['relax-2fa']) fail('Use either --enable-2fa or --relax-2fa, not both.');
+  let actionUrl = '';
+  if (args['action-url']) {
+    if (typeof args['action-url'] !== 'string') fail('Give the site address:  --action-url https://your-site.web.app');
+    actionUrl = args['action-url'].trim().replace(/\/+$/, '');
+    if (!/^https:\/\/|^http:\/\/localhost(:\d+)?/.test(actionUrl)) fail('--action-url must start with https:// (or http://localhost for testing).');
+    if (!actionUrl.endsWith('/auth/action')) actionUrl += '/auth/action';
+  }
 
   const fbt = loadFirebaseTools();
 
@@ -76,6 +85,7 @@ async function main() {
   console.log(`  Level          : Super Admin`);
   if (args['enable-2fa']) console.log('  2FA            : turn on authenticator-app 2FA and REQUIRE it for everyone');
   if (args['relax-2fa']) console.log('  2FA            : stop requiring 2FA');
+  if (actionUrl) console.log(`  Email links    : ${actionUrl}`);
   console.log(`  Firebase CLI   : v${fbt.version}`);
 
   if (!args.yes) {
@@ -254,6 +264,27 @@ async function main() {
       ok('2FA is no longer required. Users who set it up still use it.');
     } catch (e) {
       fail(`Could not save settings/security: ${apiError(e)}`);
+    }
+  }
+
+  // 6. Branded page for the links in Firebase emails
+  if (actionUrl) {
+    step('Pointing password-reset and verification emails at the app...');
+    const identityAdmin2 = new fbt.apiv2.Client({ urlPrefix: 'https://identitytoolkit.googleapis.com', apiVersion: 'admin/v2' });
+    try {
+      await identityAdmin2.patch(
+        `/projects/${projectId}/config`,
+        { notification: { sendEmail: { callbackUri: actionUrl } } },
+        { ...userProject, queryParams: { updateMask: 'notification.sendEmail.callbackUri' } }
+      );
+      ok(`Email links now open ${actionUrl}`);
+      if (!/\.(web\.app|firebaseapp\.com)\//.test(actionUrl + '/') && !actionUrl.startsWith('http://localhost')) {
+        console.log('  Using your own domain? Add it under Firebase console > Authentication > Settings > Authorized domains.');
+      }
+    } catch (e) {
+      fail(
+        `Could not set the email link address: ${apiError(e)}\n  You can also set it in Firebase console > Authentication > Templates > (pencil) > Customize action URL.`
+      );
     }
   }
 

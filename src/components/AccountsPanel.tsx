@@ -463,7 +463,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                         ))}
                       </select>
                       {acc.mustChangePassword && (
-                        <div className="text-[10px] text-amber-700 mt-1">Hasn't set their own password yet</div>
+                        <div className="text-[10px] text-amber-700 mt-1">Still on temporary password (updates at their next CMS sign-in)</div>
                       )}
                       {!acc.hasAccess && (
                         <div className="text-[10px] text-rose-600 mt-1">Missing CMS access (not in admins)</div>

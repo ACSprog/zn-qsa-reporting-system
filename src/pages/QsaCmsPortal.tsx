@@ -60,6 +60,7 @@ import { ROLE_INFO } from '../lib/accounts';
 import { FirstLoginPasswordChange } from '../components/FirstLoginPasswordChange';
 import { TwoFactorRequired, isEnrolledIn2fa } from '../components/TwoFactorSetup';
 import type { MultiFactorResolver } from 'firebase/auth';
+import { SessionGuard, markCmsActivity, clearCmsActivity } from '../components/SessionGuard';
 import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
 
 const ISSUER_LABEL = 'Zambia Airways QSA';
@@ -85,6 +86,8 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   const [enrolled2fa, setEnrolled2fa] = useState<boolean>(false);
   const [mfaResolver, setMfaResolver] = useState<MultiFactorResolver | null>(null);
   const [mfaCode, setMfaCode] = useState<string>('');
+  // Why the user was signed out automatically (inactivity / session limit)
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const isManager = isManagerRole(role);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -225,6 +228,8 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   const handleEmailPasswordSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    setSessionNotice(null);
+    markCmsActivity(); // fresh session: don't count time from a previous one
     if (!loginEmail.trim() || !loginPassword) {
       setAuthError('Please enter both your email address and password.');
       return;
@@ -256,6 +261,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
     e.preventDefault();
     if (!mfaResolver) return;
     setAuthError(null);
+    markCmsActivity();
     setIsSubmittingAuth(true);
     try {
       const res = await completeMfaSignIn(mfaResolver, mfaCode);
@@ -296,11 +302,19 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   };
 
   const handleSignOut = async () => {
+    clearCmsActivity();
     await signOutUser();
     setCurrentUser(null);
     setIsAdmin(false);
     setIsQsaAdmin(false);
     setReports([]);
+  };
+
+  // Automatic sign-out (inactivity or maximum session length)
+  const handleSessionExpired = async (message: string) => {
+    setSessionNotice(message);
+    setSelectedReport(null);
+    await handleSignOut();
   };
 
   // Filtered reports for Inbox
@@ -494,6 +508,13 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                 Backend Content & Safety Management System for authorized Zambia Airways flight safety officers and QSA administrators.
               </p>
             </div>
+
+            {sessionNotice && !authError && (
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 text-left flex items-start gap-2">
+                <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span>{sessionNotice}</span>
+              </div>
+            )}
 
             {authError && (
               <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 text-left flex items-start gap-2">
@@ -773,24 +794,36 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   }
 
   // Signed in with a temporary password: make them choose their own first
+  // Signed in from here on: watch for inactivity and the maximum session length
+  const sessionGuard = <SessionGuard user={currentUser} onExpire={handleSessionExpired} />;
+
   if (mustChangePassword) {
     return (
-      <FirstLoginPasswordChange
-        email={currentUser?.email || ''}
-        onDone={() => setMustChangePassword(false)}
-        onSignOut={handleSignOut}
-      />
+      <>
+        {sessionGuard}
+        <FirstLoginPasswordChange
+          email={currentUser?.email || ''}
+          onDone={() => setMustChangePassword(false)}
+          onSignOut={handleSignOut}
+        />
+      </>
     );
   }
 
   // 2FA required for everyone but this session didn't use it (not set up yet)
   if (require2fa && !session2fa) {
-    return <TwoFactorRequired email={currentUser?.email || ''} enrolled={enrolled2fa} onSignOut={handleSignOut} />;
+    return (
+      <>
+        {sessionGuard}
+        <TwoFactorRequired email={currentUser?.email || ''} enrolled={enrolled2fa} onSignOut={handleSignOut} />
+      </>
+    );
   }
 
   // 3. Full CMS Dashboard Layout
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col md:flex-row text-slate-900 font-sans selection:bg-[#1B8E44] selection:text-white">
+      {sessionGuard}
       {/* ======================================================== */}
       {/* CMS SIDEBAR */}
       {/* ======================================================== */}
@@ -876,17 +909,6 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
               <span>CMS Configuration</span>
             </button>
 
-            {onNavigatePublicSite && (
-              <div className="pt-3 mt-3 border-t border-[#164a27]">
-                <button
-                  onClick={onNavigatePublicSite}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all text-emerald-100/80 hover:bg-[#123e20] hover:text-white"
-                >
-                  <Home className="w-4 h-4 text-[#F37C1C]" />
-                  <span>Public Reporting Site</span>
-                </button>
-              </div>
-            )}
           </nav>
         </div>
 

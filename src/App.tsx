@@ -20,9 +20,10 @@ import { Footer } from './components/Footer';
 import { HomePage } from './pages/HomePage';
 import { FormPage } from './pages/FormPage';
 import { QsaCmsPortal } from './pages/QsaCmsPortal';
+import { AuthActionPage } from './pages/AuthActionPage';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<'home' | 'form' | 'cms'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'form' | 'cms' | 'auth'>('home');
   const [selectedForm, setSelectedForm] = useState<FormType>('hazard');
 
   // Parse path, query parameters, and hash to support distinct URLs
@@ -33,6 +34,12 @@ export default function App() {
 
     const portalParam = searchParams.get('portal')?.toLowerCase() || searchParams.get('page')?.toLowerCase();
     const formParam = searchParams.get('form')?.toLowerCase() || searchParams.get('report')?.toLowerCase();
+
+    // 0. Links from Firebase emails (password reset, email verification)
+    if (path === '/auth/action') {
+      setCurrentView('auth');
+      return;
+    }
 
     // 1. Check for CMS Portal routes (/cms, /admin, /qsa)
     if (
@@ -113,6 +120,22 @@ export default function App() {
     window.history.pushState({}, '', '/cms');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Branded page for links in Firebase emails
+  if (currentView === 'auth') {
+    return (
+      <AuthActionPage
+        onGoToCms={() => {
+          window.history.replaceState({}, '', '/admin');
+          setCurrentView('cms');
+        }}
+        onGoHome={() => {
+          window.history.replaceState({}, '', '/');
+          setCurrentView('home');
+        }}
+      />
+    );
+  }
 
   // If in CMS view, render the dedicated QSA CMS Console
   if (currentView === 'cms') {
