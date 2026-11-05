@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import {
   BaseReportData,
+  CmsRole,
   FormType,
   ReportingType,
   ReportStatus
@@ -53,6 +54,7 @@ import {
 } from '../lib/firebase';
 import { DetailDrawer } from '../components/DetailDrawer';
 import { AccountsPanel } from '../components/AccountsPanel';
+import { FirstLoginPasswordChange } from '../components/FirstLoginPasswordChange';
 import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
 
 type CmsTab = 'inbox' | 'analytics' | 'sync' | 'accounts' | 'settings';
@@ -68,6 +70,9 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   const [isVerifyingAuth, setIsVerifyingAuth] = useState<boolean>(true);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [isQsaAdmin, setIsQsaAdmin] = useState<boolean>(false);
+  const [role, setRole] = useState<CmsRole | null>(null);
+  const [mustChangePassword, setMustChangePassword] = useState<boolean>(false);
+  const isManager = role === 'manager';
   const [authError, setAuthError] = useState<string | null>(null);
 
   // Active CMS Navigation Tab
@@ -89,6 +94,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [showArchived, setShowArchived] = useState<boolean>(false);
+  const [pendingDeletionOnly, setPendingDeletionOnly] = useState<boolean>(false);
 
 
   // Email & Password Sign-in state
@@ -127,16 +133,21 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
           await signOutUser();
           setIsAdmin(false);
           setIsQsaAdmin(false);
+          setRole(null);
           setCurrentUser(null);
         } else {
           setIsAdmin(true);
           setIsQsaAdmin(roles.isQsaAdmin);
+          setRole(roles.role);
+          setMustChangePassword(roles.mustChangePassword);
           setAuthError(null);
         }
       } else {
         setCurrentUser(null);
         setIsAdmin(false);
         setIsQsaAdmin(false);
+        setRole(null);
+        setMustChangePassword(false);
       }
       setIsVerifyingAuth(false);
     });
@@ -251,6 +262,9 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
       if (!showArchived && r.deleted) return false;
       if (showArchived && !r.deleted) return false;
 
+      // Deletion requests awaiting a Manager
+      if (pendingDeletionOnly && r.deletionRequest?.status !== 'pending') return false;
+
       // Category filter
       if (selectedCategoryTab !== 'all' && r.form !== selectedCategoryTab) return false;
 
@@ -293,6 +307,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
     urgentOnly,
     reportingFilter,
     hasEvidenceOnly,
+    pendingDeletionOnly,
     startDate,
     endDate,
     searchQuery,
@@ -362,6 +377,11 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   };
 
   // Metrics calculation
+  const pendingDeletionCount = useMemo(
+    () => reports.filter((r) => !r.deleted && r.deletionRequest?.status === 'pending').length,
+    [reports]
+  );
+
   const metrics = useMemo(() => {
     const total = reports.length;
     const newCount = reports.filter((r) => (r.status || 'New') === 'New').length;
@@ -457,6 +477,11 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                 <div>Email: <strong className="text-slate-900 font-bold">admin@zambiaairways.co.zm</strong></div>
                 <div>Password: <strong className="text-slate-900 font-bold">safety2026</strong></div>
               </div>
+              {backendMode !== 'firestore' && (
+                <p className="text-[10px] text-emerald-900/80 mt-1.5">
+                  Preview: sign in as <code>viewer@…</code> or <code>officer@…</code> (any password, 6+ characters) to try the lower privilege levels.
+                </p>
+              )}
             </div>
 
             )}
@@ -654,6 +679,17 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
     );
   }
 
+  // Signed in with a temporary password: make them choose their own first
+  if (mustChangePassword) {
+    return (
+      <FirstLoginPasswordChange
+        email={currentUser?.email || ''}
+        onDone={() => setMustChangePassword(false)}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
   // 3. Full CMS Dashboard Layout
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col md:flex-row text-slate-900 font-sans selection:bg-[#1B8E44] selection:text-white">
@@ -727,7 +763,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
               }`}
             >
               <Users className="w-4 h-4 text-[#F37C1C]" />
-              <span>{isQsaAdmin ? 'User Accounts' : 'My Account'}</span>
+              <span>{isManager ? 'User Accounts' : 'My Account'}</span>
             </button>
 
             <button
@@ -765,7 +801,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
               </div>
               <div className="text-[10px] text-emerald-300 flex items-center gap-1 font-medium mt-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                {isQsaAdmin ? 'QSA Inspector' : 'Safety Officer'}
+                {role === 'manager' ? 'Manager' : role === 'viewer' ? 'Viewer' : 'Officer'}
               </div>
             </div>
             <button
@@ -792,7 +828,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
               {activeCmsTab === 'inbox' && 'Submissions Management'}
               {activeCmsTab === 'analytics' && 'Safety Analytics & Metrics'}
               {activeCmsTab === 'sync' && 'Excel & SharePoint Sync Engine'}
-              {activeCmsTab === 'accounts' && (isQsaAdmin ? 'User Accounts' : 'My Account')}
+              {activeCmsTab === 'accounts' && (isManager ? 'User Accounts' : 'My Account')}
               {activeCmsTab === 'settings' && 'CMS Policy Settings'}
             </span>
           </div>
@@ -869,6 +905,22 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                   Set the <code>VITE_FIREBASE_*</code> variables (see <code>.env.example</code>) and restart the app to use the real database.
                 </span>
               </div>
+            )}
+            {isManager && pendingDeletionCount > 0 && !pendingDeletionOnly && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingDeletionOnly(true);
+                  setShowArchived(false);
+                }}
+                className="w-full text-left p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-900 flex items-center gap-2 hover:bg-rose-100 transition-colors"
+              >
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>
+                  <strong>{pendingDeletionCount} deletion request{pendingDeletionCount === 1 ? '' : 's'} awaiting your approval.</strong>{' '}
+                  Click to review.
+                </span>
+              </button>
             )}
             {reportsError && (
               <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
@@ -1025,6 +1077,38 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                       />
                       <span>With Attachments</span>
                     </label>
+
+                    {isManager && (
+                      <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={pendingDeletionOnly}
+                          onChange={(e) => {
+                            setPendingDeletionOnly(e.target.checked);
+                            if (e.target.checked) setShowArchived(false);
+                          }}
+                          className="w-4 h-4 text-rose-600 rounded border-slate-300"
+                        />
+                        <span className="font-bold text-rose-700">
+                          Deletion requests ({pendingDeletionCount})
+                        </span>
+                      </label>
+                    )}
+
+                    {isManager && (
+                      <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={showArchived}
+                          onChange={(e) => {
+                            setShowArchived(e.target.checked);
+                            if (e.target.checked) setPendingDeletionOnly(false);
+                          }}
+                          className="w-4 h-4 text-slate-600 rounded border-slate-300"
+                        />
+                        <span>Archived</span>
+                      </label>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1127,6 +1211,11 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                             >
                               {report.status || 'New'}
                             </span>
+                            {!report.deleted && report.deletionRequest?.status === 'pending' && (
+                              <span className="block mt-1 text-[9px] font-black uppercase text-rose-700">
+                                Deletion requested
+                              </span>
+                            )}
                           </td>
                           <td className="py-3.5 px-4 text-right">
                             <button
@@ -1294,7 +1383,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
           <AccountsPanel
             currentUid={currentUser?.uid || ''}
             currentEmail={currentUser?.email || ''}
-            canManage={isQsaAdmin}
+            canManage={isManager}
           />
         )}
 
@@ -1333,7 +1422,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
               </div>
 
               <div className="border-t border-slate-100 pt-4 text-xs text-slate-500">
-                Access to this CMS is strictly verified against the Firestore <code>admins</code> collection for officer operations and <code>qsaAdmins</code> for confidential identity disclosure.
+                Access to this CMS is verified against the Firestore <code>admins</code> collection. Each user has a privilege level: <strong>Viewer</strong> (read only), <strong>Officer</strong> (update reports, request deletion) or <strong>Manager</strong> (approve deletions, see reporter identities, manage users).
               </div>
             </div>
           </div>
@@ -1349,6 +1438,8 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
           loadReports();
         }}
         isQsaAdmin={isQsaAdmin}
+        role={role || 'viewer'}
+        currentUser={currentUser}
       />
 
     </div>

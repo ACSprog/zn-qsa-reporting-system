@@ -7,7 +7,7 @@
  *   1. Creates the Firestore database if the project doesn't have one yet
  *   2. Publishes firestore.rules and turns on Email/Password sign-in (firebase deploy)
  *   3. Creates the admin login (or reuses it if the email already exists)
- *   4. Adds that user to the "admins" and "qsaAdmins" collections
+ *   4. Gives that user the highest level (admins/{uid} with role "manager")
  *
  * Options:
  *   --project <id>      Firebase project ID (default: VITE_FIREBASE_PROJECT_ID from .env.local)
@@ -245,11 +245,11 @@ async function main() {
   if (!uid) fail('Could not create the login. Wait a minute and run this command again.');
 
   // 4. Admin role documents
-  step('Giving the login admin access...');
-  for (const collection of ['admins', 'qsaAdmins']) {
+  step('Giving the login Manager access (highest level)...');
+  for (const collection of ['admins']) {
     try {
       await firestoreApi.patch(`${dbPath}/documents/${collection}/${uid}`, {
-        fields: { enabled: { booleanValue: true }, email: { stringValue: email } }
+        fields: { enabled: { booleanValue: true }, email: { stringValue: email }, role: { stringValue: 'manager' } }
       });
       ok(`${collection}/${uid}`);
     } catch (e) {

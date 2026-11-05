@@ -10,37 +10,81 @@ service cloud.firestore {
       return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
+    // Legacy marker: anyone in qsaAdmins is treated as a Manager
     function isQsaAdmin() {
       return isSignedIn() && exists(/databases/$(database)/documents/qsaAdmins/$(request.auth.uid));
+    }
+
+    // Privilege levels, stored as admins/{uid}.role:
+    //   viewer  - read reports only
+    //   officer - also update status/notes and REQUEST deletion (default for docs without a role)
+    //   manager - also approve deletions / archive / restore, see reporter identities, manage users
+    function myRole() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('role', 'officer');
+    }
+
+    function isManager() {
+      return isAdmin() && (isQsaAdmin() || myRole() == 'manager');
+    }
+
+    function isOfficer() {
+      return isAdmin() && (isManager() || myRole() == 'officer');
     }
 
     function isReportForm(form) {
       return form in ['hazard', 'incident', 'accident', 'concern'];
     }
 
-    // Role documents written by account managers. Only these fields are allowed.
+    // Role documents written by Managers. Only these fields are allowed.
     function validRoleDoc() {
-      return request.resource.data.keys().hasOnly(['enabled', 'email', 'name', 'createdAt', 'createdBy'])
-        && request.resource.data.enabled == true
-        && request.resource.data.email is string
-        && request.resource.data.email.size() <= 320
-        && (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() <= 200));
+      let d = request.resource.data;
+      return d.keys().hasOnly(['enabled', 'email', 'name', 'role', 'mustChangePassword', 'createdAt', 'createdBy'])
+        && d.enabled == true
+        && d.email is string && d.email.size() <= 320
+        && d.get('role', 'officer') in ['viewer', 'officer', 'manager']
+        && d.get('mustChangePassword', false) is bool
+        && d.get('name', '') is string && d.get('name', '').size() <= 200;
     }
 
-    // Admins (CMS access). QSA admins act as account managers: they can list, add and
-    // remove CMS users, but can never remove their own access (prevents lock-out).
+    // CMS users. Managers list, add, change and remove other users; nobody can change
+    // or remove their own access (prevents lock-out).
     match /admins/{uid} {
-      allow read: if isSignedIn() && (request.auth.uid == uid || isQsaAdmin());
-      allow create, update: if isQsaAdmin() && validRoleDoc();
-      allow delete: if isQsaAdmin() && request.auth.uid != uid;
+      allow read: if isSignedIn() && (request.auth.uid == uid || isManager());
+      allow create, update: if isManager() && request.auth.uid != uid && validRoleDoc();
+      // A user may only clear their own "must change password" flag after changing it
+      allow update: if isSignedIn() && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePassword'])
+        && request.resource.data.mustChangePassword == false;
+      allow delete: if isManager() && request.auth.uid != uid;
     }
 
-    // QSA Admins (identity viewer + account manager)
+    // Legacy Manager marker (older setups). New code stores the role on admins/{uid};
+    // Managers may only remove these docs (e.g. when changing an old Manager's role).
     match /qsaAdmins/{uid} {
-      allow read: if isSignedIn() && (request.auth.uid == uid || isQsaAdmin());
-      allow create, update: if isQsaAdmin() && validRoleDoc()
-        && existsAfter(/databases/$(database)/documents/admins/$(uid));
-      allow delete: if isQsaAdmin() && request.auth.uid != uid;
+      allow read: if isSignedIn() && (request.auth.uid == uid || isManager());
+      allow create, update: if false;
+      allow delete: if isManager() && request.auth.uid != uid;
+    }
+
+    function reportChanges() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function validStatus() {
+      return request.resource.data.status in ['New', 'Under review', 'Action required', 'Closed'];
+    }
+
+    // An Officer asking a Manager to delete (archive) a report
+    function isNewDeletionRequest() {
+      let dr = request.resource.data.deletionRequest;
+      return reportChanges().hasOnly(['deletionRequest'])
+        && resource.data.deleted == false
+        && resource.data.get('deletionRequest', {'status': 'none'}).status != 'pending'
+        && dr.keys().hasOnly(['status', 'requestedBy', 'requestedByEmail', 'requestedAt', 'reason'])
+        && dr.status == 'pending'
+        && dr.requestedBy == request.auth.uid
+        && dr.requestedAt == request.time
+        && dr.reason is string && dr.reason.size() > 0 && dr.reason.size() <= 1000;
     }
 
     // Report collections (hazard, incident, accident, concern ONLY)
@@ -56,14 +100,21 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && request.resource.data.keys().size() <= 60
         // identity fields must never be stored on the report document
-        && !request.resource.data.keys().hasAny(['name', 'department', 'position', 'contact']);
+        && !request.resource.data.keys().hasAny(['name', 'department', 'position', 'contact'])
+        // deletion requests can only be added later by CMS Officers
+        && !('deletionRequest' in request.resource.data);
 
       allow read: if isAdmin() && isReportForm(form);
 
-      allow update: if isAdmin()
-        && isReportForm(form)
-        && request.resource.data.status in ['New', 'Under review', 'Action required', 'Closed']
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'notes', 'deleted']);
+      // Viewers: no updates. Officers: status/notes, or a deletion request.
+      // Managers: status/notes, archive/restore (deleted) and deciding deletion requests.
+      allow update: if isReportForm(form) && validStatus() && (
+        (isManager()
+          && reportChanges().hasOnly(['status', 'notes', 'deleted', 'deletionRequest'])
+          && request.resource.data.deleted is bool)
+        || (isOfficer() && reportChanges().hasOnly(['status', 'notes']))
+        || (isOfficer() && isNewDeletionRequest())
+      );
 
       allow delete: if false;
 
@@ -92,7 +143,7 @@ service cloud.firestore {
         && request.resource.data.department is string && request.resource.data.department.size() <= 300
         && request.resource.data.position is string && request.resource.data.position.size() <= 300
         && request.resource.data.contact is string && request.resource.data.contact.size() <= 300;
-      allow read: if isQsaAdmin();
+      allow read: if isManager();
       allow update, delete: if false;
     }
   }
