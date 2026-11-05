@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Firebase emulator local data and logs
+.emulator-data/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

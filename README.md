@@ -40,6 +40,32 @@ cp .env.example .env.local
 npm run dev
 ```
 
+### Local Hosting with Firebase Emulators (no cloud project needed)
+Runs a real Firestore database and login system on your own computer, with the same security rules as production. Reports are shared between every tab, browser and device that opens the app, and are kept between restarts.
+
+**One-time setup**
+1. Install **Java 21 or newer** (e.g. from https://adoptium.net), needed by the Firestore emulator.
+2. Install the Firebase CLI: `npm install -g firebase-tools`
+3. In `.env.local`, set `VITE_USE_FIREBASE_EMULATORS=true`.
+
+**Each time you work** (use two terminals)
+```bash
+# Terminal 1: start the local database and login emulators
+npm run emulators
+
+# Terminal 2 (first time, and after clearing emulator data): create the QSA admin login
+npm run seed:emulators            # admin@zambiaairways.co.zm / safety2026
+# or: npm run seed:emulators -- you@example.com yourPassword
+
+# Terminal 2: start the app
+npm run dev
+```
+- Public forms: http://localhost:3000 · QSA dashboard: http://localhost:3000/admin
+- Emulator dashboard (browse/edit data, users): http://localhost:4000
+- **Other devices on the same Wi-Fi** (e.g. a phone): open `http://<this computer's IP>:3000`. Allow Node/Java through the firewall for ports 3000, 8081 and 9099 if asked.
+- Data is saved to `.emulator-data/` when you stop the emulators with Ctrl+C. Delete that folder to start fresh.
+- The emulators use the project ID `demo-zn-qsa`, so nothing can reach a real Firebase project. `VITE_USE_FIREBASE_EMULATORS` is ignored in production builds.
+
 ### Production Build & Firebase Deployment
 ```bash
 # Build production bundle

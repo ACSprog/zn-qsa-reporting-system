@@ -1,6 +1,7 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
+  connectFirestoreEmulator,
   Firestore,
   doc,
   setDoc,
@@ -18,6 +19,7 @@ import {
 } from 'firebase/firestore';
 import {
   getAuth,
+  connectAuthEmulator,
   Auth,
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
@@ -34,10 +36,19 @@ import {
 } from '../types';
 import { stripIdentityIfAnonymous, getCategoryForForm } from './idGenerator';
 
+/**
+ * Local development against the Firebase Emulator Suite (npm run emulators).
+ * Enabled with VITE_USE_FIREBASE_EMULATORS=true in .env.local. Never active in production builds.
+ * Uses a "demo-" project ID so nothing can ever reach a real cloud project.
+ */
+export const usingEmulators =
+  import.meta.env.DEV && String(import.meta.env.VITE_USE_FIREBASE_EMULATORS || '').toLowerCase() === 'true';
+const EMULATOR_PROJECT_ID = 'demo-zn-qsa';
+
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || (usingEmulators ? 'demo-api-key' : ''),
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
+  projectId: usingEmulators ? EMULATOR_PROJECT_ID : import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
   appId: import.meta.env.VITE_FIREBASE_APP_ID || ''
@@ -58,6 +69,13 @@ if (isFirebaseConfigured) {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
     db = getFirestore(app);
     auth = getAuth(app);
+    if (usingEmulators) {
+      // Same host the page was opened from, so phones on your Wi-Fi reach the emulators on this computer
+      const host = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
+      connectFirestoreEmulator(db, host, 8081);
+      connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+      console.info(`[Firebase] Using local emulators on ${host} (project ${EMULATOR_PROJECT_ID})`);
+    }
   } catch (err) {
     console.warn('Firebase initialization failed; falling back to in-memory session mode:', err);
   }
