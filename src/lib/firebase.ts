@@ -72,7 +72,7 @@ if (isFirebaseConfigured) {
     if (usingEmulators) {
       // Same host the page was opened from, so phones on your Wi-Fi reach the emulators on this computer
       const host = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
-      connectFirestoreEmulator(db, host, 8081);
+      connectFirestoreEmulator(db, host, 8180);
       connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
       console.info(`[Firebase] Using local emulators on ${host} (project ${EMULATOR_PROJECT_ID})`);
     }
