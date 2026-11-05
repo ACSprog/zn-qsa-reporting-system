@@ -14,7 +14,9 @@ import {
   ChevronRight,
   Copy,
   Ban,
-  CircleCheck
+  CircleCheck,
+  ShieldOff,
+  Lock
 } from 'lucide-react';
 import {
   CmsAccount,
@@ -30,7 +32,10 @@ import {
   setAccountBlocked,
   assignableRoles,
   canManageAccount,
-  ALL_ROLES
+  ALL_ROLES,
+  getRequire2fa,
+  setRequire2fa,
+  reset2faCommand
 } from '../lib/accounts';
 import { CmsRole } from '../types';
 import { TwoFactorStatus } from './TwoFactorSetup';
@@ -76,6 +81,50 @@ const primaryBtn =
 
 export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, currentEmail, canManage, myRole, onPasswordChanged, onTwoFactorEnrolled }) => {
   const assignable = assignableRoles(myRole);
+  const isSuperAdmin = myRole === 'superadmin';
+
+  // Super Admin security controls
+  const [require2fa, setRequire2faState] = useState<boolean | null>(null);
+  const [savingSecurity, setSavingSecurity] = useState(false);
+  const [securityNotice, setSecurityNotice] = useState<Notice>(null);
+  const [resetFor, setResetFor] = useState<CmsAccount | null>(null);
+  const [resetCopied, setResetCopied] = useState(false);
+
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    getRequire2fa()
+      .then(setRequire2faState)
+      .catch(() => setRequire2faState(null));
+  }, [isSuperAdmin]);
+
+  const toggleRequire2fa = async () => {
+    if (require2fa === null) return;
+    const next = !require2fa;
+    if (
+      !window.confirm(
+        next
+          ? 'Require 2FA for every CMS user?\n\nAnyone without an authenticator app set up will be asked to set one up at their next sign-in, and cannot see reports until they do.'
+          : 'Stop requiring 2FA?\n\nUse this only in an emergency (e.g. people locked out). Users who already set up 2FA will still be asked for their code.'
+      )
+    )
+      return;
+    setSavingSecurity(true);
+    setSecurityNotice(null);
+    try {
+      await setRequire2fa(next, currentEmail);
+      setRequire2faState(next);
+      setSecurityNotice({
+        kind: 'ok',
+        text: next
+          ? '2FA is now required. Users set it up at their next sign-in; anyone signed in without it must sign in again.'
+          : '2FA is no longer required.'
+      });
+    } catch (e: any) {
+      setSecurityNotice({ kind: 'error', text: e.message });
+    } finally {
+      setSavingSecurity(false);
+    }
+  };
   const [accounts, setAccounts] = useState<CmsAccount[]>([]);
   const [loading, setLoading] = useState(false);
   const [listNotice, setListNotice] = useState<Notice>(null);
@@ -256,6 +305,48 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
         </p>
       </div>
 
+      {isSuperAdmin && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
+                <Lock className="w-4 h-4 text-[#1B8E44]" /> Security (Super Admin)
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Two-step sign-in for all CMS users:{' '}
+                {require2fa === null ? (
+                  'checking...'
+                ) : require2fa ? (
+                  <strong className="text-emerald-700">Required</strong>
+                ) : (
+                  <strong className="text-amber-700">Not required</strong>
+                )}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={toggleRequire2fa}
+              disabled={savingSecurity || require2fa === null}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold disabled:opacity-50 ${
+                require2fa
+                  ? 'border border-amber-300 text-amber-800 hover:bg-amber-50'
+                  : 'bg-[#1B8E44] hover:bg-[#147236] text-white'
+              }`}
+            >
+              {savingSecurity ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : require2fa ? (
+                <ShieldOff className="w-3.5 h-3.5" />
+              ) : (
+                <ShieldCheck className="w-3.5 h-3.5" />
+              )}
+              {require2fa ? 'Stop requiring 2FA' : 'Require 2FA for everyone'}
+            </button>
+          </div>
+          <NoticeBox notice={securityNotice} />
+        </div>
+      )}
+
       {canManage && (
       <>
       {/* Account list */}
@@ -277,6 +368,42 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
         {listNotice && (
           <div className="px-5 pt-4">
             <NoticeBox notice={listNotice} />
+          </div>
+        )}
+
+        {resetFor && (
+          <div className="mx-5 mt-4 p-4 rounded-xl border border-slate-300 bg-slate-50 text-xs text-slate-700 space-y-2">
+            <div className="flex items-center justify-between">
+              <strong className="flex items-center gap-1.5">
+                <ShieldOff className="w-4 h-4 text-slate-500" /> Reset 2FA for {resetFor.email}
+              </strong>
+              <button type="button" onClick={() => setResetFor(null)} className="text-slate-400 hover:text-slate-700 font-bold">
+                Close
+              </button>
+            </div>
+            <p>
+              On the free Firebase plan the browser isn't allowed to remove someone else's authenticator, so this step is run from a
+              computer that has the project code and the Firebase CLI, signed in with the Google account that owns this Firebase project
+              (<code>firebase login:use owner@gmail.com</code>). In the project folder, run:
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <code className="px-2.5 py-1.5 rounded bg-white border border-slate-300 font-mono">{reset2faCommand(resetFor.email)}</code>
+              <button
+                type="button"
+                onClick={() =>
+                  navigator.clipboard
+                    ?.writeText(reset2faCommand(resetFor.email))
+                    .then(() => setResetCopied(true))
+                    .catch(() => undefined)
+                }
+                className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 hover:bg-white font-bold"
+              >
+                <Copy className="w-3 h-3" /> {resetCopied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Afterwards they sign in with their password and set up their new phone. Tip: block the account while their phone is missing if you are worried it was stolen.
+            </p>
           </div>
         )}
 
@@ -353,6 +480,20 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                           {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
                           Send reset email
                         </button>
+                        {isSuperAdmin && (
+                          <button
+                            onClick={() => {
+                              setResetFor(acc);
+                              setResetCopied(false);
+                            }}
+                            disabled={!acc.email}
+                            title="Remove this user's authenticator app (lost or new phone)"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 disabled:opacity-40"
+                          >
+                            <ShieldOff className="w-3.5 h-3.5" />
+                            Reset 2FA
+                          </button>
+                        )}
                         <button
                           onClick={() => handleBlock(acc)}
                           disabled={busy || !canAct}
