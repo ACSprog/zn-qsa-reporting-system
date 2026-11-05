@@ -7,7 +7,7 @@
  */
 const PROJECT_ID = 'demo-zn-qsa';
 const AUTH = 'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1';
-const FIRESTORE = `http://127.0.0.1:8081/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
+const FIRESTORE = `http://127.0.0.1:8180/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 
 const email = (process.argv[2] || 'admin@zambiaairways.co.zm').trim().toLowerCase();
 const password = process.argv[3] || 'safety2026';

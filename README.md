@@ -62,7 +62,7 @@ npm run dev
 ```
 - Public forms: http://localhost:3000 · QSA dashboard: http://localhost:3000/admin
 - Emulator dashboard (browse/edit data, users): http://localhost:4000
-- **Other devices on the same Wi-Fi** (e.g. a phone): open `http://<this computer's IP>:3000`. Allow Node/Java through the firewall for ports 3000, 8081 and 9099 if asked.
+- **Other devices on the same Wi-Fi** (e.g. a phone): open `http://<this computer's IP>:3000`. Allow Node/Java through the firewall for ports 3000, 8180 and 9099 if asked.
 - Data is saved to `.emulator-data/` when you stop the emulators with Ctrl+C. Delete that folder to start fresh.
 - The emulators use the project ID `demo-zn-qsa`, so nothing can reach a real Firebase project. `VITE_USE_FIREBASE_EMULATORS` is ignored in production builds.
 
