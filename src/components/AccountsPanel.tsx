@@ -12,7 +12,9 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
-  Copy
+  Copy,
+  Ban,
+  CircleCheck
 } from 'lucide-react';
 import {
   CmsAccount,
@@ -24,19 +26,26 @@ import {
   removeCmsAccount,
   sendAccountPasswordReset,
   changeOwnPassword,
-  isWelcomeFlowConfigured
+  isWelcomeFlowConfigured,
+  setAccountBlocked,
+  assignableRoles,
+  canManageAccount,
+  ALL_ROLES
 } from '../lib/accounts';
 import { CmsRole } from '../types';
-
-const ROLES: CmsRole[] = ['viewer', 'officer', 'manager'];
+import { TwoFactorStatus } from './TwoFactorSetup';
 
 interface AccountsPanelProps {
   currentUid: string;
   currentEmail: string;
   /** Managers can manage users; everyone else only sees "Change my password" */
   canManage: boolean;
+  /** The signed-in user's level (decides which users and levels they can manage) */
+  myRole: CmsRole | null;
   /** Called after the user changes their own password */
   onPasswordChanged?: () => void;
+  /** Called after the user turns on 2FA (they should sign in again) */
+  onTwoFactorEnrolled?: () => void;
 }
 
 type Notice = { kind: 'ok' | 'error'; text: string } | null;
@@ -65,7 +74,8 @@ const inputCls =
 const primaryBtn =
   'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#1B8E44] hover:bg-[#147236] text-white text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed';
 
-export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, currentEmail, canManage, onPasswordChanged }) => {
+export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, currentEmail, canManage, myRole, onPasswordChanged, onTwoFactorEnrolled }) => {
+  const assignable = assignableRoles(myRole);
   const [accounts, setAccounts] = useState<CmsAccount[]>([]);
   const [loading, setLoading] = useState(false);
   const [listNotice, setListNotice] = useState<Notice>(null);
@@ -175,6 +185,29 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
     }
   };
 
+  const handleBlock = async (acc: CmsAccount) => {
+    const block = !acc.blocked;
+    if (
+      !window.confirm(
+        block
+          ? `Block ${acc.email || acc.uid}?\nThey lose access to the CMS immediately. You can unblock them at any time.`
+          : `Unblock ${acc.email || acc.uid}? They will be able to sign in again as ${ROLE_INFO[acc.role].label}.`
+      )
+    )
+      return;
+    setBusyUid(acc.uid);
+    setListNotice(null);
+    try {
+      await setAccountBlocked(acc, block);
+      setListNotice({ kind: 'ok', text: `${acc.email || acc.uid} has been ${block ? 'blocked' : 'unblocked'}.` });
+      refresh();
+    } catch (e: any) {
+      setListNotice({ kind: 'error', text: e.message });
+    } finally {
+      setBusyUid(null);
+    }
+  };
+
   const handleRemove = async (acc: CmsAccount) => {
     if (!window.confirm(`Remove all CMS access for ${acc.email || acc.uid}?\nThey will no longer be able to sign in to the CMS.`)) return;
     setBusyUid(acc.uid);
@@ -260,13 +293,21 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
               {accounts.map((acc) => {
                 const isMe = acc.uid === currentUid;
                 const busy = busyUid === acc.uid;
+                const canAct = !isMe && canManageAccount(myRole, acc);
+                const lockedReason = isMe
+                  ? 'You cannot change your own account'
+                  : 'Only a Super Admin can change Managers and Super Admins';
+                const roleOptions = assignable.includes(acc.role) ? assignable : [acc.role, ...assignable];
                 return (
-                  <tr key={acc.uid} className="hover:bg-slate-50/60">
+                  <tr key={acc.uid} className={`hover:bg-slate-50/60 ${acc.blocked ? 'bg-slate-50 opacity-75' : ''}`}>
                     <td className="px-5 py-3">
                       <div className="font-bold text-slate-900 flex items-center gap-1.5">
                         {acc.name || acc.email || <span className="italic text-slate-400">No email on record</span>}
                         {isMe && (
                           <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-900 text-white">YOU</span>
+                        )}
+                        {acc.blocked && (
+                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white">BLOCKED</span>
                         )}
                       </div>
                       {acc.name && acc.email && <div className="text-slate-500">{acc.email}</div>}
@@ -275,19 +316,21 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                     <td className="px-3 py-3">
                       <select
                         value={acc.role}
-                        disabled={busy || isMe}
+                        disabled={busy || !canAct}
                         onChange={(e) => handleRoleChange(acc, e.target.value as CmsRole)}
-                        title={isMe ? 'You cannot change your own level' : ROLE_INFO[acc.role].description}
+                        title={canAct ? ROLE_INFO[acc.role].description : lockedReason}
                         className={`text-[11px] font-black rounded-full px-2.5 py-1 border disabled:opacity-80 disabled:cursor-not-allowed ${
-                          acc.role === 'manager'
+                          acc.role === 'superadmin'
+                            ? 'bg-[#0d3b1f] text-white border-[#0d3b1f]'
+                            : acc.role === 'manager'
                             ? 'bg-[#F37C1C]/15 text-[#b95a0d] border-[#F37C1C]/30'
                             : acc.role === 'officer'
                               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                               : 'bg-slate-100 text-slate-700 border-slate-200'
                         }`}
                       >
-                        {ROLES.map((r) => (
-                          <option key={r} value={r}>
+                        {roleOptions.map((r) => (
+                          <option key={r} value={r} disabled={!assignable.includes(r)}>
                             {ROLE_INFO[r].label}
                           </option>
                         ))}
@@ -311,9 +354,22 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                           Send reset email
                         </button>
                         <button
+                          onClick={() => handleBlock(acc)}
+                          disabled={busy || !canAct}
+                          title={canAct ? (acc.blocked ? 'Let this user sign in again' : 'Stop this user signing in (can be undone)') : lockedReason}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border font-bold disabled:opacity-40 ${
+                            acc.blocked
+                              ? 'border-emerald-200 hover:bg-emerald-50 text-emerald-700'
+                              : 'border-amber-200 hover:bg-amber-50 text-amber-700'
+                          }`}
+                        >
+                          {acc.blocked ? <CircleCheck className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
+                          {acc.blocked ? 'Unblock' : 'Block'}
+                        </button>
+                        <button
                           onClick={() => handleRemove(acc)}
-                          disabled={busy || isMe}
-                          title={isMe ? 'You cannot remove your own access' : 'Remove CMS access'}
+                          disabled={busy || !canAct}
+                          title={canAct ? 'Remove CMS access (for people who have left)' : lockedReason}
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 font-bold text-rose-700 disabled:opacity-40"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -335,7 +391,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
           </table>
         </div>
         <div className="px-5 py-3 border-t border-slate-100 text-[11px] text-slate-500">
-          {ROLES.map((r) => (
+          {ALL_ROLES.map((r) => (
             <span key={r} className="block">
               <strong>{ROLE_INFO[r].label}:</strong> {ROLE_INFO[r].description}
             </span>
@@ -372,7 +428,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">Privilege level</label>
             <select value={newRole} onChange={(e) => setNewRole(e.target.value as CmsRole)} className={inputCls}>
-              {ROLES.map((r) => (
+              {assignable.map((r) => (
                 <option key={r} value={r}>
                   {ROLE_INFO[r].label}
                 </option>
@@ -448,6 +504,8 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
             Change password
           </button>
         </form>
+
+        <TwoFactorStatus onEnrolled={() => onTwoFactorEnrolled?.()} />
       </div>
     </div>
   );
