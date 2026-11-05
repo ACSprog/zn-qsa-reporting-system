@@ -31,6 +31,7 @@ import {
   getMultiFactorResolver,
   TotpMultiFactorGenerator,
   MultiFactorResolver,
+  ActionCodeSettings,
   User
 } from 'firebase/auth';
 import {
@@ -795,6 +796,22 @@ export async function signInWithEmail(
   }
 }
 
+/**
+ * Firebase email links (reset / verification) get a "Continue" button back to the CMS sign-in,
+ * even when Firebase's own page is used. Falls back to no button if this site's domain isn't
+ * in Firebase Auth's authorized domains (so the email is still sent).
+ */
+export async function withCmsContinueLink<T>(send: (settings?: ActionCodeSettings) => Promise<T>): Promise<T> {
+  const settings: ActionCodeSettings | undefined =
+    typeof window !== 'undefined' ? { url: `${window.location.origin}/admin` } : undefined;
+  try {
+    return await send(settings);
+  } catch (e: any) {
+    if (settings && /continue-uri|unauthorized-domain/.test(e?.code || '')) return send(undefined);
+    throw e;
+  }
+}
+
 /** When the current CMS session started (last real sign-in), in ms since epoch. */
 export async function getSessionStartMs(user: any): Promise<number | null> {
   if (user && typeof user.getIdTokenResult === 'function') {
@@ -840,7 +857,7 @@ export async function sendResetPasswordEmail(
 
   if (auth) {
     try {
-      await sendPasswordResetEmail(auth, cleanEmail);
+      await withCmsContinueLink((settings) => sendPasswordResetEmail(auth!, cleanEmail, settings));
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to dispatch password reset email.' };

@@ -282,9 +282,10 @@ async function main() {
         console.log('  Using your own domain? Add it under Firebase console > Authentication > Settings > Authorized domains.');
       }
     } catch (e) {
-      fail(
-        `Could not set the email link address: ${apiError(e)}\n  You can also set it in Firebase console > Authentication > Templates > (pencil) > Customize action URL.`
-      );
+      // Not fatal: Firebase blocks email-template changes on some projects (EMAIL_TEMPLATE_UPDATE_NOT_ALLOWED)
+      console.log(`\x1b[33m!\x1b[0m Firebase did not allow changing the email link address (${apiError(e)}).`);
+      console.log('  Try Firebase console > Authentication > Templates > (pencil) > Customize action URL.');
+      console.log("  If that's blocked too, emails keep using Firebase's own page (with a Continue button back to the CMS).");
     }
   }
 

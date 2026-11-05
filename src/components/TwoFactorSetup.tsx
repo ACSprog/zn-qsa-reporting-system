@@ -8,7 +8,7 @@ import {
   User
 } from 'firebase/auth';
 import { ShieldCheck, Loader2, Mail, AlertTriangle, CheckCircle2, Smartphone, LogOut, Copy } from 'lucide-react';
-import { getFirebaseHandles } from '../lib/firebase';
+import { getFirebaseHandles, withCmsContinueLink } from '../lib/firebase';
 import { ZambiaAirwaysLogo } from './ZambiaAirwaysLogo';
 
 const ISSUER = 'Zambia Airways QSA';
@@ -77,7 +77,7 @@ const EnrollFlow: React.FC<FlowProps> = ({ onEnrolled }) => {
     setBusy(true);
     setError(null);
     try {
-      await sendEmailVerification(user);
+      await withCmsContinueLink((settings) => sendEmailVerification(user, settings));
       setSentVerification(true);
     } catch (e) {
       setError(friendly(e));

@@ -33,7 +33,7 @@ import {
   deleteField,
   serverTimestamp
 } from 'firebase/firestore';
-import { getFirebaseHandles, usingEmulators, tempPasswordFingerprint } from './firebase';
+import { getFirebaseHandles, usingEmulators, tempPasswordFingerprint, withCmsContinueLink } from './firebase';
 import { CmsRole } from '../types';
 
 export const ROLE_INFO: Record<CmsRole, { label: string; description: string }> = {
@@ -328,7 +328,7 @@ export async function addCmsAccount(input: AddAccountInput, invitedByEmail: stri
     return { uid, createdLogin, emailVia: 'none' };
   }
   try {
-    await sendPasswordResetEmail(auth, email);
+    await withCmsContinueLink((settings) => sendPasswordResetEmail(auth, email, settings));
     return { uid, createdLogin, tempPassword, emailVia: 'firebase' };
   } catch (e) {
     return { uid, createdLogin, tempPassword, emailVia: 'none', emailError: friendlyError(e) };
@@ -398,7 +398,7 @@ export async function sendAccountPasswordReset(email: string): Promise<void> {
   const { auth } = getFirebaseHandles();
   if (!auth) return; // preview mode
   try {
-    await sendPasswordResetEmail(auth, email.trim().toLowerCase());
+    await withCmsContinueLink((settings) => sendPasswordResetEmail(auth, email.trim().toLowerCase(), settings));
   } catch (e) {
     throw new Error(friendlyError(e));
   }
