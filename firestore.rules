@@ -18,16 +18,29 @@ service cloud.firestore {
       return form in ['hazard', 'incident', 'accident', 'concern'];
     }
 
-    // Admins metadata collection
-    match /admins/{uid} {
-      allow read: if isSignedIn() && request.auth.uid == uid;
-      allow write: if false;
+    // Role documents written by account managers. Only these fields are allowed.
+    function validRoleDoc() {
+      return request.resource.data.keys().hasOnly(['enabled', 'email', 'name', 'createdAt', 'createdBy'])
+        && request.resource.data.enabled == true
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 320
+        && (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() <= 200));
     }
 
-    // QSA Admins collection (privileged identity viewer)
+    // Admins (CMS access). QSA admins act as account managers: they can list, add and
+    // remove CMS users, but can never remove their own access (prevents lock-out).
+    match /admins/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isQsaAdmin());
+      allow create, update: if isQsaAdmin() && validRoleDoc();
+      allow delete: if isQsaAdmin() && request.auth.uid != uid;
+    }
+
+    // QSA Admins (identity viewer + account manager)
     match /qsaAdmins/{uid} {
-      allow read: if isSignedIn() && request.auth.uid == uid;
-      allow write: if false;
+      allow read: if isSignedIn() && (request.auth.uid == uid || isQsaAdmin());
+      allow create, update: if isQsaAdmin() && validRoleDoc()
+        && existsAfter(/databases/$(database)/documents/admins/$(uid));
+      allow delete: if isQsaAdmin() && request.auth.uid != uid;
     }
 
     // Report collections (hazard, incident, accident, concern ONLY)

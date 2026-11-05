@@ -85,6 +85,9 @@ npm run setup:firebase -- --email admin@example.com --password YourPassword
 ```
 This creates the Firestore database (default location `africa-south1`, change with `--location`), publishes `firestore.rules`, turns on Email/Password sign-in, creates the admin login and adds it to `admins` and `qsaAdmins`. It shows the account and project and asks before changing anything, and is safe to re-run. Works on the free Spark plan. Options: `--project <id>`, `--account <email>`, `--location <loc>`, `--yes`.
 
+### CMS User Accounts
+In the CMS, **User Accounts** (QSA Inspectors only) lets you add users, email them a password-reset link, switch them between Safety Officer and QSA Inspector, and remove access. Everyone can change their own password under **My Account**. New users get a random password and an email link to set their own. Setting another user's password directly or deleting logins would need Cloud Functions (Blaze plan), so this uses reset emails instead. These features need the current `firestore.rules` deployed: `firebase deploy --only firestore:rules`.
+
 ### Production Build & Firebase Deployment
 ```bash
 # Build production bundle
