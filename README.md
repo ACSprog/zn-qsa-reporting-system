@@ -116,6 +116,19 @@ This upgrades the project to *Firebase Authentication with Identity Platform* (f
 
 These features need the current `firestore.rules` deployed: `firebase deploy --only firestore:rules` (the setup script does this).
 
+### CMS Sessions
+- Signed out after **15 minutes without activity** (60-second "Are you still there?" warning first). Activity in any CMS tab counts.
+- Must sign in again after **8 hours**, even if active. The security rules refuse sessions older than 12 hours as a backstop.
+- Closing the browser signs you out; refreshing the page does not.
+- Change the limits with `VITE_CMS_IDLE_MINUTES` and `VITE_CMS_MAX_SESSION_HOURS` (max 12) in `.env.local` / the build environment.
+
+### Branded Password-Reset & Email-Verification Page
+Links in Firebase's emails can open the app's own page (`/auth/action`) instead of Firebase's plain one. Point them at your deployed site once per project:
+```bash
+npm run setup:firebase -- --email you@zambiaairways.co.zm --action-url https://zn-qsa-reporting-system-test.web.app
+```
+(Or Firebase console → Authentication → Templates → pencil → *Customize action URL* → `https://<site>/auth/action`.) The site must be deployed first. After resetting, users can continue straight into the CMS, and the "temporary password" label on User Accounts clears automatically at their next sign-in.
+
 ### Production Build & Firebase Deployment
 ```bash
 # Build production bundle

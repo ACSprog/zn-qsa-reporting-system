@@ -18,12 +18,19 @@ service cloud.firestore {
         || has2fa();
     }
 
+    // Backstop for the CMS session limit: refuse sessions signed in more than 12 hours ago
+    // (the CMS itself signs people out after 8 hours by default)
+    function sessionFresh() {
+      return request.time.toMillis() < (request.auth.token.auth_time + 43200) * 1000;
+    }
+
     // An unblocked CMS user (blocked users have enabled == false) who passed 2FA if required
     function isAdmin() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('enabled', true) != false
-        && twoFactorOk();
+        && twoFactorOk()
+        && sessionFresh();
     }
 
     // Legacy marker: anyone in qsaAdmins is treated as a Manager
@@ -69,12 +76,13 @@ service cloud.firestore {
     // Role documents written by Managers. Only these fields are allowed.
     function validRoleDoc() {
       let d = request.resource.data;
-      return d.keys().hasOnly(['enabled', 'email', 'name', 'role', 'mustChangePassword', 'createdAt', 'createdBy'])
+      return d.keys().hasOnly(['enabled', 'email', 'name', 'role', 'mustChangePassword', 'tempPasswordHash', 'createdAt', 'createdBy'])
         && d.enabled is bool
         && d.email is string && d.email.size() <= 320
         && d.get('role', 'officer') in ['viewer', 'officer', 'manager', 'superadmin']
         && d.get('mustChangePassword', false) is bool
-        && d.get('name', '') is string && d.get('name', '').size() <= 200;
+        && d.get('name', '') is string && d.get('name', '').size() <= 200
+        && d.get('tempPasswordHash', '') is string && d.get('tempPasswordHash', '').size() <= 128;
     }
 
     // CMS users. Managers add, change, block and remove Viewers and Officers; Super Admins
@@ -88,10 +96,12 @@ service cloud.firestore {
           || (juniorRole(request.resource.data.get('role', 'officer'))
             && juniorRole(resource.data.get('role', 'officer'))
             && !isLegacyManager(uid)));
-      // A user may only clear their own "must change password" flag after changing it
+      // A user may only clear their own "must change password" flag (and the temporary
+      // password fingerprint) once they use a password of their own
       allow update: if isSignedIn() && request.auth.uid == uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePassword'])
-        && request.resource.data.mustChangePassword == false;
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePassword', 'tempPasswordHash'])
+        && request.resource.data.mustChangePassword == false
+        && !('tempPasswordHash' in request.resource.data);
       allow delete: if isManager() && request.auth.uid != uid
         && (isSuperAdmin() || (juniorRole(resource.data.get('role', 'officer')) && !isLegacyManager(uid)));
     }

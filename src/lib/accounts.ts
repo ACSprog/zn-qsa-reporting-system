@@ -30,9 +30,10 @@ import {
   writeBatch,
   setDoc,
   updateDoc,
+  deleteField,
   serverTimestamp
 } from 'firebase/firestore';
-import { getFirebaseHandles, usingEmulators } from './firebase';
+import { getFirebaseHandles, usingEmulators, tempPasswordFingerprint } from './firebase';
 import { CmsRole } from '../types';
 
 export const ROLE_INFO: Record<CmsRole, { label: string; description: string }> = {
@@ -306,6 +307,9 @@ export async function addCmsAccount(input: AddAccountInput, invitedByEmail: stri
       createdBy: invitedByEmail
     };
     if (name) roleDoc.name = name;
+    // Lets the CMS notice, at their next sign-in, that they already chose their own password
+    // (e.g. through the e-mailed reset link) without ever storing the temporary password itself
+    if (tempPassword) roleDoc.tempPasswordHash = await tempPasswordFingerprint(uid, tempPassword);
     await setDoc(doc(db, 'admins', uid), roleDoc);
   } catch (e) {
     const msg = friendlyError(e);
@@ -415,7 +419,7 @@ export async function changeOwnPassword(currentPassword: string, newPassword: st
     throw new Error(friendlyError(e));
   }
   try {
-    await updateDoc(doc(db, 'admins', user.uid), { mustChangePassword: false });
+    await updateDoc(doc(db, 'admins', user.uid), { mustChangePassword: false, tempPasswordHash: deleteField() });
   } catch {
     // Flag may not exist (older accounts) or the user has no admins doc; the password is changed either way
   }
@@ -426,7 +430,7 @@ export async function clearMustChangePassword(): Promise<void> {
   const { auth, db } = getFirebaseHandles();
   if (!auth?.currentUser || !db) return;
   try {
-    await updateDoc(doc(db, 'admins', auth.currentUser.uid), { mustChangePassword: false });
+    await updateDoc(doc(db, 'admins', auth.currentUser.uid), { mustChangePassword: false, tempPasswordHash: deleteField() });
   } catch (e) {
     throw new Error(friendlyError(e));
   }

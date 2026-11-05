@@ -8,6 +8,7 @@ import {
   getDoc,
   getDocs,
   updateDoc,
+  deleteField,
   collection,
   query,
   where,
@@ -25,6 +26,8 @@ import {
   sendPasswordResetEmail,
   signOut as fbSignOut,
   onAuthStateChanged,
+  setPersistence,
+  browserSessionPersistence,
   getMultiFactorResolver,
   TotpMultiFactorGenerator,
   MultiFactorResolver,
@@ -66,6 +69,43 @@ export const isFirebaseConfigured = Boolean(
   firebaseConfig.projectId
 );
 
+/**
+ * CMS session limits (override in .env.local / build env):
+ *   VITE_CMS_IDLE_MINUTES        sign out after this many minutes without activity (default 15)
+ *   VITE_CMS_MAX_SESSION_HOURS   sign in again after this many hours regardless (default 8, max 12;
+ *                                firestore.rules refuse sessions older than 12 hours)
+ */
+function envNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.max(n, min), max) : fallback;
+}
+export const SESSION_LIMITS = {
+  idleMinutes: envNumber(import.meta.env.VITE_CMS_IDLE_MINUTES, 15, 2, 240),
+  maxSessionHours: envNumber(import.meta.env.VITE_CMS_MAX_SESSION_HOURS, 8, 1, 12)
+};
+
+/**
+ * One-way fingerprint of a temporary password (SHA-256 of uid + password). Stored on the user's
+ * admins doc so the CMS can tell, at sign-in, whether they are still using the temporary password.
+ * The temporary password is random (~70 bits), so the fingerprint can't be reversed.
+ */
+export async function tempPasswordFingerprint(uid: string, password: string): Promise<string> {
+  const bytes = new TextEncoder().encode(`${uid}:${password}`);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Password typed at the latest sign-in, kept in memory only until roles are checked (max 2 min). */
+let pendingSignInPassword: { password: string; at: number } | null = null;
+function takePendingPassword(): string | null {
+  const p = pendingSignInPassword;
+  pendingSignInPassword = null;
+  return p && Date.now() - p.at < 120_000 ? p.password : null;
+}
+
+/** Resolves once the sign-in storage mode has been applied (await before signing in). */
+let authPersistenceReady: Promise<void> = Promise.resolve();
+
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
@@ -75,6 +115,10 @@ if (isFirebaseConfigured) {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
     db = getFirestore(app);
     auth = getAuth(app);
+    // Keep the CMS session only for this browser tab/window: closing it signs the user out
+    authPersistenceReady = setPersistence(auth, browserSessionPersistence).catch((e) =>
+      console.warn('Could not set session-only sign-in:', e)
+    );
     if (usingEmulators) {
       // Same host the page was opened from, so phones on your Wi-Fi reach the emulators on this computer
       const host = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
@@ -597,6 +641,21 @@ export async function verifyUserRoles(user: User | { uid: string; email?: string
       if (!adminDoc.exists()) return none;
       const data = adminDoc.data() || {};
       if (data.enabled === false) return { ...none, blocked: true };
+
+      // Still flagged as using a temporary password? If they just signed in with a different
+      // password, they already chose their own (e.g. via the e-mailed link): clear the flag.
+      const typedPassword = takePendingPassword();
+      if (data.mustChangePassword === true && typedPassword && typeof data.tempPasswordHash === 'string') {
+        const fingerprint = await tempPasswordFingerprint(user.uid, typedPassword);
+        if (fingerprint !== data.tempPasswordHash) {
+          try {
+            await updateDoc(doc(db, 'admins', user.uid), { mustChangePassword: false, tempPasswordHash: deleteField() });
+            data.mustChangePassword = false;
+          } catch (e) {
+            console.warn('Could not clear the temporary-password flag:', e);
+          }
+        }
+      }
       const qsaDoc = await getDoc(doc(db, 'qsaAdmins', user.uid));
       let require2fa = false;
       try {
@@ -689,6 +748,8 @@ export async function signInWithEmail(
   }
 
   if (auth) {
+    await authPersistenceReady;
+    pendingSignInPassword = { password, at: Date.now() };
     try {
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
       return { user: cred.user };
@@ -722,7 +783,8 @@ export async function signInWithEmail(
     mockUser = {
       uid: fakeUid,
       email: cleanEmail,
-      displayName: cleanEmail.split('@')[0].toUpperCase()
+      displayName: cleanEmail.split('@')[0].toUpperCase(),
+      signedInAt: Date.now()
     };
     inMemoryStore.admins.add(fakeUid);
     inMemoryStore.admins.add(cleanEmail);
@@ -731,6 +793,19 @@ export async function signInWithEmail(
     mockAuthListeners.forEach((cb) => cb(mockUser));
     return { user: mockUser };
   }
+}
+
+/** When the current CMS session started (last real sign-in), in ms since epoch. */
+export async function getSessionStartMs(user: any): Promise<number | null> {
+  if (user && typeof user.getIdTokenResult === 'function') {
+    try {
+      const token = await user.getIdTokenResult();
+      return token.authTime ? new Date(token.authTime).getTime() : null;
+    } catch {
+      return null;
+    }
+  }
+  return user?.signedInAt ?? null; // preview mock
 }
 
 /** Second sign-in step: the 6-digit code from the authenticator app. */
