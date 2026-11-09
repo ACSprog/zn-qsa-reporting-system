@@ -505,6 +505,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 )}
               </div>
 
+              {meta.askFlightDetails && (
+              <>
               {/* Flight No */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -546,6 +548,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   />
                 </div>
               </div>
+              </>
+              )}
             </div>
           </section>
 

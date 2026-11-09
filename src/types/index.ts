@@ -125,6 +125,8 @@ export interface FieldDefinition {
   hint?: string;
   /** Only show (and require) this field when another field has the given value */
   showWhen?: { field: string; equals: string };
+  /** No longer asked on the form; still shown in the CMS for older reports that have it */
+  retired?: boolean;
 }
 
 export interface SyncResultPerForm {

@@ -16,7 +16,11 @@ export interface FormMeta {
   collection: string;
   tableName: string;
   useWhen: string;
+  /** Short example shown on the home page card */
+  example?: string;
   categoryField: string;
+  /** Ask for Flight No. / Aircraft Reg. / Aircraft Type in section 1 */
+  askFlightDetails: boolean;
 }
 
 export const FORMS_META: Record<FormType, FormMeta> = {
@@ -26,8 +30,10 @@ export const FORMS_META: Record<FormType, FormMeta> = {
     prefix: 'HAZ',
     collection: 'hazard',
     tableName: 'tblHazard',
-    useWhen: 'Use when you notice something that could cause harm or create a safety risk, even if nothing has happened yet.',
-    categoryField: 'hazardCategory'
+    useWhen: 'Report something unsafe that could cause an accident, injury, damage or harm, even if nothing has happened yet.',
+    example: 'A slippery floor, faulty equipment or an obstruction on the ramp.',
+    categoryField: 'hazardCategory',
+    askFlightDetails: false
   },
   occurrence: {
     type: 'occurrence',
@@ -36,8 +42,10 @@ export const FORMS_META: Record<FormType, FormMeta> = {
     collection: 'occurrence',
     tableName: 'tblOccurrence',
     useWhen:
-      'Use when something unplanned has happened: an incident, or an accident with injury, death or significant damage. Report what happened; QSA will determine the follow-up.',
-    categoryField: 'incidentType'
+      'Report an accident, incident or near miss that has happened during work or operations, whether or not anyone was injured or anything was damaged.',
+    example: 'An aircraft ground collision, equipment damage, a slip or fall, or a near miss between aircraft and ground vehicles.',
+    categoryField: 'incidentType',
+    askFlightDetails: true
   },
   incident: {
     type: 'incident',
@@ -46,7 +54,8 @@ export const FORMS_META: Record<FormType, FormMeta> = {
     collection: 'incident',
     tableName: 'tblIncident',
     useWhen: 'Use when an unplanned event has occurred. Report what happened; QSA will determine the required follow-up.',
-    categoryField: 'incidentType'
+    categoryField: 'incidentType',
+    askFlightDetails: true
   },
   accident: {
     type: 'accident',
@@ -55,7 +64,8 @@ export const FORMS_META: Record<FormType, FormMeta> = {
     collection: 'accident',
     tableName: 'tblAccident',
     useWhen: 'Use when an occurrence has resulted in actual injury, death, significant damage or another serious consequence. Report facts only.',
-    categoryField: ''
+    categoryField: '',
+    askFlightDetails: true
   },
   concern: {
     type: 'concern',
@@ -63,8 +73,10 @@ export const FORMS_META: Record<FormType, FormMeta> = {
     prefix: 'SC',
     collection: 'concern',
     tableName: 'tblConcern',
-    useWhen: 'Use when you have a safety-related concern that needs attention but does not clearly fit an immediate hazard or incident.',
-    categoryField: 'concernCategory'
+    useWhen: 'Raise any safety-related worry or issue that you believe needs attention or improvement.',
+    example: 'Repeated unsafe practices, inadequate training, fatigue or unclear safety procedures.',
+    categoryField: 'concernCategory',
+    askFlightDetails: true
   }
 };
 
@@ -170,7 +182,8 @@ export const HAZARD_SPECIFIC_FIELDS: FieldDefinition[] = [
     type: 'select',
     required: false,
     section: 2,
-    options: HAZARD_GROUPS
+    options: HAZARD_GROUPS,
+    retired: true
   },
   {
     key: 'hazardCategory',
@@ -194,7 +207,8 @@ export const HAZARD_SPECIFIC_FIELDS: FieldDefinition[] = [
     type: 'textarea',
     required: true,
     section: 2,
-    placeholder: 'Describe the condition, object or practice that represents a hazard...'
+    hint: 'Describe it in as much detail as possible.',
+    placeholder: 'The condition, object or practice that is unsafe, where exactly it is, and anything else that would help QSA understand it...'
   },
   {
     key: 'whatCouldHappen',
@@ -218,7 +232,8 @@ export const HAZARD_SPECIFIC_FIELDS: FieldDefinition[] = [
     type: 'textarea',
     required: false,
     section: 2,
-    placeholder: 'Current barriers or procedures already in place, if any...'
+    placeholder: 'Current barriers or procedures already in place, if any...',
+    retired: true
   },
   {
     key: 'immediateAction',
@@ -252,11 +267,12 @@ export const INCIDENT_SPECIFIC_FIELDS: FieldDefinition[] = [
   },
   {
     key: 'whatHappened',
-    label: 'Briefly, what happened?',
+    label: 'What happened?',
     type: 'textarea',
     required: true,
     section: 2,
-    placeholder: 'Clear, factual description of the occurrence...'
+    hint: 'Describe it in as much detail as possible.',
+    placeholder: 'A clear, factual account: what happened, in what order, who and what was involved...'
   },
   {
     key: 'before',
@@ -644,6 +660,7 @@ export const CONCERN_SPECIFIC_FIELDS: FieldDefinition[] = [
 
 /** Whether a field applies, given the answers so far (see FieldDefinition.showWhen). */
 export function isFieldVisible(field: FieldDefinition, data: Record<string, any>): boolean {
+  if (field.retired) return false;
   return !field.showWhen || data[field.showWhen.field] === field.showWhen.equals;
 }
 
