@@ -646,6 +646,8 @@ export interface UserRoles {
   global2fa?: boolean;
   /** Per-person setting from a Super Admin: 'on', 'off', or undefined = follow everyone */
   twoFactor?: 'on' | 'off';
+  /** What the user's record says about whether they use an authenticator app */
+  twoFactorEnrolled?: boolean;
   /** Locked after too many wrong passwords */
   locked?: boolean;
   /** Super Admins: a change to their own account another Super Admin asked them to confirm */
@@ -726,6 +728,7 @@ export async function verifyUserRoles(user: User | { uid: string; email?: string
         twoFactorOff,
         global2fa,
         twoFactor,
+        twoFactorEnrolled: data.twoFactorEnrolled === true,
         pendingAction: data.pendingAction || undefined
       };
     } catch {
@@ -829,6 +832,16 @@ export async function decideDeletionRequest(
 // In-memory mock session handlers for local preview mode
 let mockUser: any = null;
 const mockAuthListeners: Array<(user: any) => void> = [];
+
+/** Records on the user's own CMS record whether they use an authenticator app (for the 2FA ON badge). */
+export async function recordMy2faInUse(uid: string, inUse: boolean): Promise<void> {
+  if (!db) return;
+  try {
+    await updateDoc(doc(db, 'admins', uid), { twoFactorEnrolled: inUse });
+  } catch (e) {
+    console.warn('Could not record the 2FA status:', e);
+  }
+}
 
 /** Is 2FA required for this person? Their own setting wins over the everyone setting. */
 export function effectiveRequire2fa(global2fa: boolean, twoFactor?: 'on' | 'off'): boolean {

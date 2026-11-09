@@ -51,6 +51,7 @@ import {
   verifyUserRoles,
   LOCKED_MESSAGE,
   effectiveRequire2fa,
+  recordMy2faInUse,
   fetchReporterIdentity,
   completeMfaSignIn,
   subscribeMyAdminRecord,
@@ -204,6 +205,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
             // (they have just signed in, so Firebase allows it) so it isn't asked for again.
             if (roles.twoFactorOff && isEnrolledIn2fa(user as any)) {
               try {
+                await recordMy2faInUse(user.uid, false);
                 await removeOwnAuthenticator(user as any);
                 // Firebase ends the session when the factor it used is removed: start clean
                 setLoginNotice('Two-step sign-in has been switched off for your account by a Super Admin. Sign in again with just your password.', user.email || undefined);
@@ -214,7 +216,11 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                 console.warn('Could not remove the authenticator:', e);
               }
             }
-            setEnrolled2fa(isEnrolledIn2fa(user as any));
+            const inUse = isEnrolledIn2fa(user as any);
+            setEnrolled2fa(inUse);
+            // Keep the "2FA ON / OFF" badge that Super Admins see in step with reality
+            if (inUse && token.signInSecondFactor && roles.twoFactorEnrolled !== true) recordMy2faInUse(user.uid, true);
+            if (!inUse && roles.twoFactorEnrolled === true) recordMy2faInUse(user.uid, false);
           } else {
             setSession2fa(false);
             setEnrolled2fa(false);

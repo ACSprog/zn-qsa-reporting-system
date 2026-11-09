@@ -230,7 +230,23 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
   };
 
   // Is 2FA required for this person right now? (their own setting wins over "everyone")
-  const twoFactorOn = (acc: CmsAccount) => acc.twoFactor === 'on' || (require2fa === true && acc.twoFactor !== 'off');
+  const twoFactorRequired = (acc: CmsAccount) => acc.twoFactor === 'on' || (require2fa === true && acc.twoFactor !== 'off');
+  // On = they use an authenticator app, or it is required for them (Stop applies); off = Start applies
+  const twoFactorOn = (acc: CmsAccount) => acc.twoFactorEnrolled === true || twoFactorRequired(acc);
+  const twoFactorBadge = (acc: CmsAccount): { label: string; cls: string; title: string } =>
+    acc.twoFactorEnrolled
+      ? { label: '2FA ON', cls: 'bg-emerald-100 text-emerald-800', title: 'Signs in with an authenticator app code' }
+      : twoFactorRequired(acc)
+        ? {
+            label: '2FA SET-UP PENDING',
+            cls: 'bg-amber-100 text-amber-800',
+            title: 'Required, but they have not signed in with an authenticator code yet'
+          }
+        : {
+            label: '2FA OFF',
+            cls: 'bg-slate-200 text-slate-600',
+            title: acc.twoFactor === 'off' ? 'A Super Admin stopped two-step sign-in for this user' : 'Signs in with just a password'
+          };
 
   // Super Admin: start or stop two-step sign-in for one person
   const handleTwoFactorToggle = async (acc: CmsAccount) => {
@@ -532,20 +548,10 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                         )}
                         {isSuperAdmin && require2fa !== null && (
                           <span
-                            title={
-                              acc.twoFactor === 'on'
-                                ? 'A Super Admin started two-step sign-in for this user'
-                                : acc.twoFactor === 'off'
-                                  ? 'A Super Admin stopped two-step sign-in for this user'
-                                  : require2fa
-                                    ? 'Two-step sign-in is required for everyone'
-                                    : 'Two-step sign-in is not required for this user'
-                            }
-                            className={`text-[9px] font-black px-1.5 py-0.5 rounded ${
-                              twoFactorOn(acc) ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
-                            }`}
+                            title={twoFactorBadge(acc).title}
+                            className={`text-[9px] font-black px-1.5 py-0.5 rounded ${twoFactorBadge(acc).cls}`}
                           >
-                            {twoFactorOn(acc) ? '2FA ON' : '2FA OFF'}
+                            {twoFactorBadge(acc).label}
                           </span>
                         )}
                       </div>
