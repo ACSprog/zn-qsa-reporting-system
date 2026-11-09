@@ -640,8 +640,12 @@ export interface UserRoles {
   blocked: boolean;
   /** settings/security.require2fa, unless a Super Admin switched 2FA off for this user */
   require2fa: boolean;
-  /** A Super Admin switched 2FA off for this user (admins/{uid}.twoFactorOff) */
+  /** A Super Admin switched 2FA off for this user (admins/{uid}.twoFactor == 'off') */
   twoFactorOff?: boolean;
+  /** settings/security.require2fa (2FA required for everyone) */
+  global2fa?: boolean;
+  /** Per-person setting from a Super Admin: 'on', 'off', or undefined = follow everyone */
+  twoFactor?: 'on' | 'off';
   /** Locked after too many wrong passwords */
   locked?: boolean;
   /** Super Admins: a change to their own account another Super Admin asked them to confirm */
@@ -692,14 +696,16 @@ export async function verifyUserRoles(user: User | { uid: string; email?: string
         }
       }
       const qsaDoc = await getDoc(doc(db, 'qsaAdmins', user.uid));
-      let require2fa = false;
-      const twoFactorOff = data.twoFactorOff === true;
+      const twoFactor: 'on' | 'off' | undefined = data.twoFactor === 'on' || data.twoFactor === 'off' ? data.twoFactor : undefined;
+      let global2fa = false;
       try {
         const sec = await getDoc(doc(db, 'settings', 'security'));
-        require2fa = sec.exists() && sec.data()?.require2fa === true && !twoFactorOff;
+        global2fa = sec.exists() && sec.data()?.require2fa === true;
       } catch {
         // older rules without settings access: treat as not required
       }
+      const require2fa = effectiveRequire2fa(global2fa, twoFactor);
+      const twoFactorOff = twoFactor === 'off';
       // Stored Super Admin wins; legacy qsaAdmins members are Managers; role-less docs are Officers
       const stored = data.role as CmsRole | undefined;
       const role: CmsRole =
@@ -718,6 +724,8 @@ export async function verifyUserRoles(user: User | { uid: string; email?: string
         blocked: false,
         require2fa,
         twoFactorOff,
+        global2fa,
+        twoFactor,
         pendingAction: data.pendingAction || undefined
       };
     } catch {
@@ -738,14 +746,19 @@ export async function verifyUserRoles(user: User | { uid: string; email?: string
  */
 export function subscribeMyAdminRecord(
   uid: string,
-  onChange: (state: { exists: boolean; blocked: boolean; pendingAction?: PendingAdminAction }) => void
+  onChange: (state: { exists: boolean; blocked: boolean; pendingAction?: PendingAdminAction; twoFactor?: 'on' | 'off' }) => void
 ): () => void {
   if (!db) return () => undefined;
   return onSnapshot(
     doc(db, 'admins', uid),
     (snap) => {
       const d = snap.data();
-      onChange({ exists: snap.exists(), blocked: d?.enabled === false, pendingAction: d?.pendingAction || undefined });
+      onChange({
+        exists: snap.exists(),
+        blocked: d?.enabled === false,
+        pendingAction: d?.pendingAction || undefined,
+        twoFactor: d?.twoFactor === 'on' || d?.twoFactor === 'off' ? d.twoFactor : undefined
+      });
     },
     () => undefined
   );
@@ -816,6 +829,11 @@ export async function decideDeletionRequest(
 // In-memory mock session handlers for local preview mode
 let mockUser: any = null;
 const mockAuthListeners: Array<(user: any) => void> = [];
+
+/** Is 2FA required for this person? Their own setting wins over the everyone setting. */
+export function effectiveRequire2fa(global2fa: boolean, twoFactor?: 'on' | 'off'): boolean {
+  return twoFactor === 'on' || (global2fa && twoFactor !== 'off');
+}
 
 /** Wrong passwords allowed before the account is locked (a Manager's password reset unlocks it). */
 export const MAX_SIGNIN_ATTEMPTS = 5;

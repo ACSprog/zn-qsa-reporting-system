@@ -50,6 +50,7 @@ import {
   subscribeToAuthState,
   verifyUserRoles,
   LOCKED_MESSAGE,
+  effectiveRequire2fa,
   fetchReporterIdentity,
   completeMfaSignIn,
   subscribeMyAdminRecord,
@@ -97,6 +98,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   const [mustChangePassword, setMustChangePassword] = useState<boolean>(false);
   // 2FA
   const [require2fa, setRequire2fa] = useState<boolean>(false);
+  const [global2fa, setGlobal2fa] = useState<boolean>(false);
   const [session2fa, setSession2fa] = useState<boolean>(false);
   const [enrolled2fa, setEnrolled2fa] = useState<boolean>(false);
   const [mfaResolver, setMfaResolver] = useState<MultiFactorResolver | null>(null);
@@ -194,6 +196,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
           setMustChangePassword(roles.mustChangePassword);
           setMyPendingAction(roles.pendingAction);
           setRequire2fa(roles.require2fa);
+          setGlobal2fa(roles.global2fa === true);
           if (typeof (user as any).getIdTokenResult === 'function') {
             const token = await (user as any).getIdTokenResult();
             setSession2fa(Boolean(token.signInSecondFactor));
@@ -362,6 +365,8 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
     if (!currentUser?.uid || !isAdmin) return;
     return subscribeMyAdminRecord(currentUser.uid, async (rec) => {
       setMyPendingAction(rec.pendingAction);
+      // A Super Admin started/stopped 2FA for me: apply straight away (Start shows the setup screen)
+      if (rec.exists) setRequire2fa(effectiveRequire2fa(global2fa, rec.twoFactor));
       if (!rec.exists || rec.blocked) {
         setSessionNotice(
           rec.blocked
@@ -372,7 +377,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.uid, isAdmin]);
+  }, [currentUser?.uid, isAdmin, global2fa]);
 
   const answerPending = async (approve: boolean) => {
     if (!myPendingAction) return;
