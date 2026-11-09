@@ -6,6 +6,7 @@ import {
   RefreshCw,
   Download,
   Search,
+  ShieldAlert,
   Filter,
   AlertTriangle,
   FileSpreadsheet,
@@ -33,6 +34,7 @@ import {
 import {
   BaseReportData,
   CmsRole,
+  PendingAdminAction,
   isManagerRole,
   FormType,
   ReportingType,
@@ -49,6 +51,7 @@ import {
   verifyUserRoles,
   fetchReporterIdentity,
   completeMfaSignIn,
+  subscribeMyAdminRecord,
   subscribeToAllReports,
   backendMode,
   clearPreviewReports,
@@ -56,7 +59,7 @@ import {
 } from '../lib/firebase';
 import { DetailDrawer } from '../components/DetailDrawer';
 import { AccountsPanel } from '../components/AccountsPanel';
-import { ROLE_INFO } from '../lib/accounts';
+import { ROLE_INFO, describePendingAction, answerMyPendingAction } from '../lib/accounts';
 import {
   isOpenUrgent,
   reportingLabel,
@@ -71,6 +74,7 @@ import { TwoFactorRequired, isEnrolledIn2fa } from '../components/TwoFactorSetup
 import type { MultiFactorResolver } from 'firebase/auth';
 import { SessionGuard, markCmsActivity, clearCmsActivity } from '../components/SessionGuard';
 import { AnnouncementEditor } from '../components/AnnouncementBanner';
+import { takeLoginNotice } from '../components/PasswordUI';
 import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
 
 const ISSUER_LABEL = 'Zambia Airways QSA';
@@ -98,6 +102,21 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   const [mfaCode, setMfaCode] = useState<string>('');
   // Why the user was signed out automatically (inactivity / session limit)
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  // A Super Admin's request about this user's own account, waiting for their answer
+  const [myPendingAction, setMyPendingAction] = useState<PendingAdminAction | undefined>(undefined);
+  const [answeringPending, setAnsweringPending] = useState(false);
+  const [pendingError, setPendingError] = useState<string | null>(null);
+
+  // Good news for the sign-in page (e.g. "password changed")
+  const [loginNotice, setLoginNoticeText] = useState<string | null>(null);
+  useEffect(() => {
+    if (currentUser) return;
+    const n = takeLoginNotice();
+    if (n) {
+      setLoginNoticeText(n.text);
+      if (n.email) setLoginEmail(n.email);
+    }
+  }, [currentUser]);
   const isManager = isManagerRole(role);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -170,6 +189,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
           setIsQsaAdmin(roles.isQsaAdmin);
           setRole(roles.role);
           setMustChangePassword(roles.mustChangePassword);
+          setMyPendingAction(roles.pendingAction);
           setRequire2fa(roles.require2fa);
           if (typeof (user as any).getIdTokenResult === 'function') {
             const token = await (user as any).getIdTokenResult();
@@ -318,6 +338,54 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
     setIsAdmin(false);
     setIsQsaAdmin(false);
     setReports([]);
+  };
+
+  // Watch this user's own account record while signed in
+  useEffect(() => {
+    if (!currentUser?.uid || !isAdmin) return;
+    return subscribeMyAdminRecord(currentUser.uid, async (rec) => {
+      setMyPendingAction(rec.pendingAction);
+      if (!rec.exists || rec.blocked) {
+        setSessionNotice(
+          rec.blocked
+            ? 'Your account has been blocked. Contact a QSA Manager if you think this is a mistake.'
+            : 'Your CMS access has been removed.'
+        );
+        await handleSignOut();
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.uid, isAdmin]);
+
+  const answerPending = async (approve: boolean) => {
+    if (!myPendingAction) return;
+    const what = describePendingAction(myPendingAction, 'your');
+    if (
+      !window.confirm(
+        approve
+          ? `Approve ${myPendingAction.requestedByEmail}'s request to ${what}?${
+              myPendingAction.type === 'role' ? '' : '\nYou will be signed out.'
+            }`
+          : `Decline the request to ${what}?`
+      )
+    )
+      return;
+    setAnsweringPending(true);
+    setPendingError(null);
+    try {
+      await answerMyPendingAction(myPendingAction, approve);
+      if (approve && myPendingAction.type === 'role') {
+        const roles = await verifyUserRoles(currentUser);
+        setRole(roles.role);
+        setIsQsaAdmin(roles.isQsaAdmin);
+        setActiveCmsTab('inbox');
+      }
+      // remove / block: the live record watcher signs the user out
+    } catch (e: any) {
+      setPendingError(e.message);
+    } finally {
+      setAnsweringPending(false);
+    }
   };
 
   // Automatic sign-out (inactivity or maximum session length)
@@ -532,6 +600,13 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                 Backend Content & Safety Management System for authorized Zambia Airways flight safety officers and QSA administrators.
               </p>
             </div>
+
+            {loginNotice && !authError && (
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 text-left flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-[#1B8E44] shrink-0 mt-0.5" />
+                <span>{loginNotice}</span>
+              </div>
+            )}
 
             {sessionNotice && !authError && (
               <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 text-left flex items-start gap-2">
@@ -827,7 +902,8 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
         {sessionGuard}
         <FirstLoginPasswordChange
           email={currentUser?.email || ''}
-          onDone={() => setMustChangePassword(false)}
+          onPasswordChanged={handleSignOut}
+          onSkipped={() => setMustChangePassword(false)}
           onSignOut={handleSignOut}
         />
       </>
@@ -1042,6 +1118,41 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
         </header>
 
         {/* Tab 1: Submissions Inbox */}
+        {/* A Super Admin asked to change this (Super Admin) user's own account */}
+        {myPendingAction && (
+          <div className="mx-4 sm:mx-6 mt-4 sm:mt-6 p-4 rounded-2xl border-2 border-amber-300 bg-amber-50 text-amber-950 shadow-sm">
+            <div className="flex items-start gap-3 flex-wrap">
+              <ShieldAlert className="w-6 h-6 text-amber-600 shrink-0" />
+              <div className="flex-1 min-w-[220px]">
+                <p className="text-sm font-black">Your confirmation is needed</p>
+                <p className="text-xs mt-0.5">
+                  <strong>{myPendingAction.requestedByEmail}</strong> has asked to{' '}
+                  <strong>{describePendingAction(myPendingAction, 'your')}</strong>. Nothing changes unless you approve.
+                </p>
+                {pendingError && <p className="text-xs text-rose-700 mt-1">{pendingError}</p>}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={answeringPending}
+                  onClick={() => answerPending(false)}
+                  className="px-3.5 py-2 rounded-lg border border-amber-400 bg-white hover:bg-amber-100 text-xs font-bold disabled:opacity-50"
+                >
+                  Decline
+                </button>
+                <button
+                  type="button"
+                  disabled={answeringPending}
+                  onClick={() => answerPending(true)}
+                  className="px-3.5 py-2 rounded-lg bg-[#DE2010] hover:bg-red-700 text-white text-xs font-bold disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {answeringPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Approve
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeCmsTab === 'inbox' && (
           <div className="p-4 sm:p-6 space-y-6">
             {backendMode === 'local' && (

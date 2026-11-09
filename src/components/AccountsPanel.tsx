@@ -30,6 +30,10 @@ import {
   changeOwnPassword,
   isWelcomeFlowConfigured,
   setAccountBlocked,
+  requestSuperAdminAction,
+  cancelSuperAdminAction,
+  needsConfirmation,
+  describePendingAction,
   assignableRoles,
   canManageAccount,
   ALL_ROLES,
@@ -39,6 +43,7 @@ import {
 } from '../lib/accounts';
 import { CmsRole } from '../types';
 import { TwoFactorStatus } from './TwoFactorSetup';
+import { NewPasswordFields, PasswordField, checkPassword } from './PasswordUI';
 
 interface AccountsPanelProps {
   currentUid: string;
@@ -218,8 +223,47 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
     }
   };
 
+  // Changes to another Super Admin become a request they must confirm themselves
+  const requestConfirmation = async (acc: CmsAccount, type: 'remove' | 'block' | 'role', newRole?: CmsRole) => {
+    const who = acc.name || acc.email || acc.uid;
+    const what =
+      type === 'remove' ? 'remove their Super Admin account' : type === 'block' ? 'block their account' : `change their level to ${ROLE_INFO[newRole!].label}`;
+    if (
+      !window.confirm(
+        `${who} is a Super Admin, so they must confirm this themselves.\n\nSend a request to ${what}? It happens only when they approve it in the CMS.`
+      )
+    )
+      return;
+    setBusyUid(acc.uid);
+    setListNotice(null);
+    try {
+      await requestSuperAdminAction(acc, type, newRole, { uid: currentUid, email: currentEmail });
+      setListNotice({ kind: 'ok', text: `Request sent. ${who} will be asked to confirm the next time they open the CMS.` });
+      refresh();
+    } catch (e: any) {
+      setListNotice({ kind: 'error', text: e.message });
+    } finally {
+      setBusyUid(null);
+    }
+  };
+
+  const handleCancelRequest = async (acc: CmsAccount) => {
+    setBusyUid(acc.uid);
+    setListNotice(null);
+    try {
+      await cancelSuperAdminAction(acc);
+      setListNotice({ kind: 'ok', text: 'Request withdrawn.' });
+      refresh();
+    } catch (e: any) {
+      setListNotice({ kind: 'error', text: e.message });
+    } finally {
+      setBusyUid(null);
+    }
+  };
+
   const handleRoleChange = async (acc: CmsAccount, role: CmsRole) => {
     if (role === acc.role) return;
+    if (needsConfirmation(acc)) return requestConfirmation(acc, 'role', role);
     if (!window.confirm(`Change ${acc.email || acc.uid} from ${ROLE_INFO[acc.role].label} to ${ROLE_INFO[role].label}?\n\n${ROLE_INFO[role].description}`)) return;
     setBusyUid(acc.uid);
     setListNotice(null);
@@ -236,6 +280,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
 
   const handleBlock = async (acc: CmsAccount) => {
     const block = !acc.blocked;
+    if (block && needsConfirmation(acc)) return requestConfirmation(acc, 'block');
     if (
       !window.confirm(
         block
@@ -258,6 +303,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
   };
 
   const handleRemove = async (acc: CmsAccount) => {
+    if (needsConfirmation(acc)) return requestConfirmation(acc, 'remove');
     if (!window.confirm(`Remove all CMS access for ${acc.email || acc.uid}?\nThey will no longer be able to sign in to the CMS.`)) return;
     setBusyUid(acc.uid);
     setListNotice(null);
@@ -275,8 +321,8 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
   const handleChangePw = async (e: React.FormEvent) => {
     e.preventDefault();
     setPwNotice(null);
-    if (newPw !== newPw2) {
-      setPwNotice({ kind: 'error', text: 'The two new passwords do not match.' });
+    if (!checkPassword(newPw, newPw2).acceptable) {
+      setPwNotice({ kind: 'error', text: 'Please meet the required items in the checklist.' });
       return;
     }
     setChangingPw(true);
@@ -420,10 +466,12 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
               {accounts.map((acc) => {
                 const isMe = acc.uid === currentUid;
                 const busy = busyUid === acc.uid;
-                const canAct = !isMe && canManageAccount(myRole, acc);
+                const canAct = !isMe && canManageAccount(myRole, acc) && !acc.pendingAction;
                 const lockedReason = isMe
-                  ? 'You cannot change your own account'
-                  : 'Only a Super Admin can change Managers and Super Admins';
+                  ? 'You cannot change your own account. Another Super Admin can, with your confirmation.'
+                  : acc.pendingAction
+                    ? 'A request is waiting for their confirmation'
+                    : 'Only a Super Admin can change Managers and Super Admins';
                 const roleOptions = assignable.includes(acc.role) ? assignable : [acc.role, ...assignable];
                 return (
                   <tr key={acc.uid} className={`hover:bg-slate-50/60 ${acc.blocked ? 'bg-slate-50 opacity-75' : ''}`}>
@@ -462,6 +510,22 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                           </option>
                         ))}
                       </select>
+                      {acc.pendingAction && (
+                        <div className="mt-1.5 text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 max-w-[220px]">
+                          Waiting for them to confirm: {describePendingAction(acc.pendingAction)}
+                          <span className="block text-amber-700/80">asked by {acc.pendingAction.requestedByEmail}</span>
+                          {acc.pendingAction.requestedBy === currentUid && (
+                            <button
+                              type="button"
+                              onClick={() => handleCancelRequest(acc)}
+                              disabled={busy}
+                              className="mt-0.5 font-bold underline hover:text-amber-950"
+                            >
+                              Withdraw request
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {acc.mustChangePassword && (
                         <div className="text-[10px] text-amber-700 mt-1">Still on temporary password (updates at their next CMS sign-in)</div>
                       )}
@@ -627,18 +691,8 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
             <KeyRound className="w-4 h-4 text-[#1B8E44]" /> Change My Password
           </div>
           <p className="text-[11px] text-slate-500">Signed in as {currentEmail}</p>
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Current password</label>
-            <input type="password" required value={curPw} onChange={(e) => setCurPw(e.target.value)} className={inputCls} autoComplete="current-password" />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">New password (at least 8 characters)</label>
-            <input type="password" required minLength={8} value={newPw} onChange={(e) => setNewPw(e.target.value)} className={inputCls} autoComplete="new-password" />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Repeat new password</label>
-            <input type="password" required minLength={8} value={newPw2} onChange={(e) => setNewPw2(e.target.value)} className={inputCls} autoComplete="new-password" />
-          </div>
+          <PasswordField id="current-password" label="Current password" value={curPw} onChange={setCurPw} disabled={changingPw} />
+          <NewPasswordFields value={newPw} repeat={newPw2} onChange={setNewPw} onRepeatChange={setNewPw2} disabled={changingPw} />
           <NoticeBox notice={pwNotice} />
           <button type="submit" disabled={changingPw} className={primaryBtn}>
             {changingPw ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}

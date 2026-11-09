@@ -1,39 +1,39 @@
 import React, { useState } from 'react';
 import { KeyRound, Loader2, AlertTriangle, LogOut } from 'lucide-react';
 import { changeOwnPassword, clearMustChangePassword, isWelcomeFlowConfigured } from '../lib/accounts';
-import { ZambiaAirwaysLogo } from './ZambiaAirwaysLogo';
+import { AuthShell, NewPasswordFields, PasswordField, checkPassword, setLoginNotice } from './PasswordUI';
 
 interface Props {
   email: string;
-  onDone: () => void;
+  /** Called after the password is changed (the CMS then signs out to the sign-in page) */
+  onPasswordChanged: () => void;
+  /** Called when the user says they already chose their own password */
+  onSkipped: () => void;
   onSignOut: () => void;
 }
 
 /** Shown after a user signs in with a temporary password. */
-export const FirstLoginPasswordChange: React.FC<Props> = ({ email, onDone, onSignOut }) => {
+export const FirstLoginPasswordChange: React.FC<Props> = ({ email, onPasswordChanged, onSkipped, onSignOut }) => {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [next2, setNext2] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const inputCls =
-    'w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B8E44]/40 focus:border-[#1B8E44]';
-
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (next !== next2) {
-      setError('The two new passwords do not match.');
+    if (!checkPassword(next, next2).acceptable) {
+      setError('Please meet the required items in the checklist.');
       return;
     }
     setBusy(true);
     try {
       await changeOwnPassword(current, next);
-      onDone();
+      setLoginNotice('Your password has been changed. Sign in with your new password.', email);
+      onPasswordChanged();
     } catch (err: any) {
       setError(err.message);
-    } finally {
       setBusy(false);
     }
   };
@@ -43,7 +43,7 @@ export const FirstLoginPasswordChange: React.FC<Props> = ({ email, onDone, onSig
     setError(null);
     try {
       await clearMustChangePassword();
-      onDone();
+      onSkipped();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -52,31 +52,23 @@ export const FirstLoginPasswordChange: React.FC<Props> = ({ email, onDone, onSig
   };
 
   return (
-    <div className="min-h-screen bg-[#07190e] flex items-center justify-center py-10 px-4">
-      <form onSubmit={submit} className="max-w-md w-full bg-white rounded-2xl shadow-2xl p-7 sm:p-9 space-y-5">
-        <div className="flex justify-center">
-          <ZambiaAirwaysLogo variant="full" theme="light" size="md" showSubtitle={false} />
-        </div>
-        <div className="text-center">
-          <h1 className="text-xl font-black text-slate-900 flex items-center justify-center gap-2">
-            <KeyRound className="w-5 h-5 text-[#F37C1C]" /> Set your own password
-          </h1>
-          <p className="text-xs text-slate-500 mt-1.5">
-            Welcome, {email}. You signed in with a temporary password. Choose your own to continue.
-          </p>
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-slate-700 mb-1">Temporary password (from your email)</label>
-          <input type="password" required value={current} onChange={(e) => setCurrent(e.target.value)} className={inputCls} autoComplete="current-password" />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-slate-700 mb-1">New password (at least 8 characters)</label>
-          <input type="password" required minLength={8} value={next} onChange={(e) => setNext(e.target.value)} className={inputCls} autoComplete="new-password" />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-slate-700 mb-1">Repeat new password</label>
-          <input type="password" required minLength={8} value={next2} onChange={(e) => setNext2(e.target.value)} className={inputCls} autoComplete="new-password" />
-        </div>
+    <AuthShell
+      title="Set your own password"
+      subtitle={
+        <>
+          Welcome, <strong className="text-slate-700">{email}</strong>. You signed in with a temporary password. Choose your own to continue.
+        </>
+      }
+      footer={
+        <button type="button" onClick={onSignOut} className="text-xs font-bold text-emerald-200/80 hover:text-white inline-flex items-center gap-1.5">
+          <LogOut className="w-3.5 h-3.5" /> Sign out
+        </button>
+      }
+    >
+      <form onSubmit={submit} className="space-y-5 text-left">
+        <PasswordField id="temp-password" label="Temporary password (from your email)" value={current} onChange={setCurrent} autoFocus disabled={busy} />
+        <div className="border-t border-slate-100" />
+        <NewPasswordFields value={next} repeat={next2} onChange={setNext} onRepeatChange={setNext2} disabled={busy} />
         {error && (
           <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
@@ -85,25 +77,18 @@ export const FirstLoginPasswordChange: React.FC<Props> = ({ email, onDone, onSig
         )}
         <button
           type="submit"
-          disabled={busy}
-          className="w-full py-3 rounded-xl bg-[#1B8E44] hover:bg-[#147236] text-white font-extrabold text-sm flex items-center justify-center gap-2 disabled:opacity-60"
+          disabled={busy || !current || !checkPassword(next, next2).acceptable}
+          className="w-full py-3.5 rounded-xl bg-[#1B8E44] hover:bg-[#147236] text-white font-extrabold text-sm shadow-lg shadow-[#1B8E44]/25 flex items-center justify-center gap-2 disabled:opacity-50 disabled:shadow-none transition"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4 text-[#F37C1C]" />}
-          Save password and continue
+          Save password
         </button>
-        <div className="flex items-center justify-between text-[11px]">
-          {!isWelcomeFlowConfigured() ? (
-            <button type="button" onClick={skip} disabled={busy} className="text-slate-500 hover:text-slate-800 underline">
-              I already chose my own password from the email link
-            </button>
-          ) : (
-            <span />
-          )}
-          <button type="button" onClick={onSignOut} className="text-slate-500 hover:text-rose-700 flex items-center gap-1">
-            <LogOut className="w-3 h-3" /> Sign out
+        {!isWelcomeFlowConfigured() && (
+          <button type="button" onClick={skip} disabled={busy} className="w-full text-[11px] text-slate-500 hover:text-slate-800 underline">
+            I already chose my own password from the email link
           </button>
-        </div>
+        )}
       </form>
-    </div>
+    </AuthShell>
   );
 };

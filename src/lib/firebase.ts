@@ -43,6 +43,7 @@ import {
   CmsRole,
   DeletionRequest,
   ReclassificationRecord,
+  PendingAdminAction,
   isManagerRole,
   ALL_REPORT_FORMS
 } from '../types';
@@ -636,6 +637,8 @@ export interface UserRoles {
   blocked: boolean;
   /** settings/security.require2fa */
   require2fa: boolean;
+  /** Super Admins: a change to their own account another Super Admin asked them to confirm */
+  pendingAction?: PendingAdminAction;
 }
 
 const VALID_ROLES: CmsRole[] = ['viewer', 'officer', 'manager', 'superadmin'];
@@ -698,7 +701,8 @@ export async function verifyUserRoles(user: User | { uid: string; email?: string
         role,
         mustChangePassword: data.mustChangePassword === true,
         blocked: false,
-        require2fa
+        require2fa,
+        pendingAction: data.pendingAction || undefined
       };
     } catch {
       return none;
@@ -710,6 +714,25 @@ export async function verifyUserRoles(user: User | { uid: string; email?: string
     const role = previewRoleFor(user.email);
     return { isAdmin: true, isQsaAdmin: isManagerRole(role), role, mustChangePassword: false, blocked: false, require2fa: false };
   }
+}
+
+/**
+ * Live view of the signed-in user's own admins doc: lets the CMS show confirmation requests
+ * straight away, and end the session at once if the account is blocked or removed.
+ */
+export function subscribeMyAdminRecord(
+  uid: string,
+  onChange: (state: { exists: boolean; blocked: boolean; pendingAction?: PendingAdminAction }) => void
+): () => void {
+  if (!db) return () => undefined;
+  return onSnapshot(
+    doc(db, 'admins', uid),
+    (snap) => {
+      const d = snap.data();
+      onChange({ exists: snap.exists(), blocked: d?.enabled === false, pendingAction: d?.pendingAction || undefined });
+    },
+    () => undefined
+  );
 }
 
 /** Officer: ask a Manager to delete (archive) a report. */
