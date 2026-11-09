@@ -104,8 +104,9 @@ service cloud.firestore {
     // Role documents written by Managers. Only these fields are allowed.
     function validRoleDoc() {
       let d = request.resource.data;
-      return d.keys().hasOnly(['enabled', 'email', 'name', 'role', 'mustChangePassword', 'tempPasswordHash', 'createdAt', 'createdBy', 'pendingAction', 'twoFactor'])
+      return d.keys().hasOnly(['enabled', 'email', 'name', 'role', 'mustChangePassword', 'tempPasswordHash', 'createdAt', 'createdBy', 'pendingAction', 'twoFactor', 'twoFactorEnrolled'])
         && d.get('twoFactor', 'on') in ['on', 'off']
+        && d.get('twoFactorEnrolled', false) is bool
         && d.enabled is bool
         && d.email is string && d.email.size() <= 320
         && d.get('role', 'officer') in ['viewer', 'officer', 'manager', 'superadmin']
@@ -184,13 +185,14 @@ service cloud.firestore {
       allow create: if request.auth.uid != uid && validRoleDoc()
         && !('pendingAction' in request.resource.data)
         && !('twoFactor' in request.resource.data)
+        && !('twoFactorEnrolled' in request.resource.data)
         && isManager()
         && (isSuperAdmin() || juniorRole(request.resource.data.get('role', 'officer')));
       // Viewers, Officers and Managers (never Super Admin records: see the rules after this one)
       allow update: if request.auth.uid != uid
         && !isSuperAdminDoc(resource.data)
         && validRoleDoc()
-        && !adminChanges().hasAny(['pendingAction'])
+        && !adminChanges().hasAny(['pendingAction', 'twoFactorEnrolled'])
         && isManager()
         // switching 2FA on/off for one person is for Super Admins only
         && (!adminChanges().hasAny(['twoFactor']) || isSuperAdmin())
@@ -208,6 +210,12 @@ service cloud.firestore {
         && request.resource.data.get('twoFactor', 'on') in ['on', 'off']
         && isSuperAdmin();
       allow update: if isPendingActionRequest(uid) || isPendingActionCancel(uid) || isOwnPendingActionAnswer(uid);
+      // Each user records whether they use an authenticator app (shown to Super Admins as
+      // 2FA ON). "true" only from a session that used the code; "false" any time.
+      allow update: if isSignedIn() && request.auth.uid == uid
+        && adminChanges().hasOnly(['twoFactorEnrolled'])
+        && request.resource.data.twoFactorEnrolled is bool
+        && (request.resource.data.twoFactorEnrolled == false || has2fa());
       // A user may only clear their own "must change password" flag (and the temporary
       // password fingerprint) once they use a password of their own
       allow update: if isSignedIn() && request.auth.uid == uid

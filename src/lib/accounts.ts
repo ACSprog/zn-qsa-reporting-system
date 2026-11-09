@@ -84,6 +84,8 @@ export interface CmsAccount {
   pendingAction?: PendingAdminAction;
   /** Per-person 2FA setting from a Super Admin: 'on', 'off', or undefined = follow everyone */
   twoFactor?: 'on' | 'off';
+  /** They use an authenticator app (recorded at their last sign-in) */
+  twoFactorEnrolled?: boolean;
   /** Locked after 5 wrong passwords (a password reset email from a Manager unlocks it) */
   locked?: boolean;
   /** Wrong passwords since their last successful sign-in */
@@ -230,7 +232,8 @@ export async function listCmsAccounts(): Promise<CmsAccount[]> {
         mustChangePassword: data.mustChangePassword === true,
         blocked: data.enabled === false,
         pendingAction: data.pendingAction || undefined,
-        twoFactor: data.twoFactor === 'on' || data.twoFactor === 'off' ? data.twoFactor : undefined
+        twoFactor: data.twoFactor === 'on' || data.twoFactor === 'off' ? data.twoFactor : undefined,
+        twoFactorEnrolled: data.twoFactorEnrolled === true
       });
     });
     qsaSnap.forEach((d) => {
