@@ -558,28 +558,40 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                             Reset 2FA
                           </button>
                         )}
-                        <button
-                          onClick={() => handleBlock(acc)}
-                          disabled={busy || !canAct}
-                          title={canAct ? (acc.blocked ? 'Let this user sign in again' : 'Stop this user signing in (can be undone)') : lockedReason}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border font-bold disabled:opacity-40 ${
-                            acc.blocked
-                              ? 'border-emerald-200 hover:bg-emerald-50 text-emerald-700'
-                              : 'border-amber-200 hover:bg-amber-50 text-amber-700'
-                          }`}
-                        >
-                          {acc.blocked ? <CircleCheck className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
-                          {acc.blocked ? 'Unblock' : 'Block'}
-                        </button>
-                        <button
-                          onClick={() => handleRemove(acc)}
-                          disabled={busy || !canAct}
-                          title={canAct ? 'Remove CMS access (for people who have left)' : lockedReason}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 font-bold text-rose-700 disabled:opacity-40"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          Remove
-                        </button>
+                        {isMe ? (
+                          <span
+                            className="text-[10px] text-slate-400 max-w-[170px] leading-snug text-right"
+                            title="Nobody can block or remove their own account"
+                          >
+                            Your own account: another {acc.role === 'superadmin' ? 'Super Admin' : 'Manager'} can block or remove it
+                            {acc.role === 'superadmin' ? ', with your confirmation' : ''}.
+                          </span>
+                        ) : (
+                          <>
+                          <button
+                            onClick={() => handleBlock(acc)}
+                            disabled={busy || !canAct}
+                            title={canAct ? (acc.blocked ? 'Let this user sign in again' : 'Stop this user signing in (can be undone)') : lockedReason}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border font-bold disabled:opacity-40 ${
+                              acc.blocked
+                                ? 'border-emerald-200 hover:bg-emerald-50 text-emerald-700'
+                                : 'border-amber-200 hover:bg-amber-50 text-amber-700'
+                            }`}
+                          >
+                            {acc.blocked ? <CircleCheck className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
+                            {acc.blocked ? 'Unblock' : 'Block'}
+                          </button>
+                          <button
+                            onClick={() => handleRemove(acc)}
+                            disabled={busy || !canAct}
+                            title={canAct ? 'Remove CMS access (for people who have left)' : lockedReason}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 font-bold text-rose-700 disabled:opacity-40"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Remove
+                          </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
