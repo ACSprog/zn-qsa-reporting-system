@@ -169,17 +169,31 @@ async function main() {
     ok(`Firestore database created in ${location}.`);
   }
 
-  // 2. Rules + Email/Password sign-in, through the normal Firebase CLI deploy
-  step('Publishing security rules and turning on Email/Password sign-in...');
+  // 2. Rules (Firebase CLI deploy) + sign-in methods (API, so nothing set in the console is undone)
+  step('Publishing security rules...');
   const deploy = spawnSync(
     'firebase',
-    ['deploy', '--only', 'firestore:rules,auth', '--project', projectId, '--account', accountEmail, '--non-interactive'],
+    ['deploy', '--only', 'firestore:rules', '--project', projectId, '--account', accountEmail, '--non-interactive'],
     { stdio: 'inherit', shell: true }
   );
-  if (deploy.status !== 0) {
-    fail('firebase deploy failed (see the messages above).\n  If it mentions "auth", update the CLI: npm install -g firebase-tools@latest\n  You can also turn on Email/Password manually: Firebase console > Authentication > Sign-in method.');
+  if (deploy.status !== 0) fail('firebase deploy failed (see the messages above).');
+  ok('Security rules published.');
+
+  step('Turning on Email/Password sign-in and email links...');
+  try {
+    // passwordRequired:false = passwords still work AND one-time email links are allowed
+    // (used by the branded "choose a new password" emails)
+    const identityAdminCfg = new fbt.apiv2.Client({ urlPrefix: 'https://identitytoolkit.googleapis.com', apiVersion: 'admin/v2' });
+    await identityAdminCfg.patch(
+      `/projects/${projectId}/config`,
+      { signIn: { email: { enabled: true, passwordRequired: false } } },
+      { ...userProject, queryParams: { updateMask: 'signIn.email.enabled,signIn.email.passwordRequired' } }
+    );
+    ok('Email/Password sign-in and email links are on.');
+  } catch (e) {
+    console.log(`\x1b[33m!\x1b[0m Could not switch them on automatically (${apiError(e)}).`);
+    console.log('  Firebase console > Authentication > Sign-in method > Email/Password: enable both switches, then Save.');
   }
-  ok('Rules published and Email/Password sign-in enabled.');
 
   // 3. Admin user
   step(`Creating the admin login ${email}...`);
