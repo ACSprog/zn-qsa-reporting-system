@@ -493,7 +493,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   type="text"
                   value={formData.location || ''}
                   onChange={(e) => handleInputChange('location', e.target.value)}
-                  placeholder="e.g. Kenneth Kaunda Int Airport (LUN), Gate 3, Apron Stand 4, Flight FL280"
+                  placeholder="e.g. Kenneth Kaunda Int Airport (LUN), Gate 3, Apron Stand 4"
                   className={`w-full px-3.5 py-2 text-sm rounded-lg border focus:outline-none focus:ring-2 ${
                     errors.location
                       ? 'border-rose-300 focus:ring-rose-400'
