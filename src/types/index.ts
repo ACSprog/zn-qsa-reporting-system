@@ -26,6 +26,15 @@ export type CmsRole = 'viewer' | 'officer' | 'manager' | 'superadmin';
 /** Manager and Super Admin share the Manager powers over reports */
 export const isManagerRole = (role: CmsRole | null | undefined) => role === 'manager' || role === 'superadmin';
 
+/** A Super Admin asking another Super Admin to confirm a change to their account */
+export interface PendingAdminAction {
+  type: 'remove' | 'block' | 'role';
+  newRole?: CmsRole;
+  requestedBy: string;
+  requestedByEmail: string;
+  requestedAt?: any;
+}
+
 export interface ReclassificationRecord {
   from: FormType;
   to: FormType;

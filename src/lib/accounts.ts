@@ -34,7 +34,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { getFirebaseHandles, usingEmulators, tempPasswordFingerprint, withCmsContinueLink } from './firebase';
-import { CmsRole } from '../types';
+import { CmsRole, PendingAdminAction } from '../types';
 
 export const ROLE_INFO: Record<CmsRole, { label: string; description: string }> = {
   viewer: { label: 'Viewer', description: 'Can view reports only.' },
@@ -80,6 +80,8 @@ export interface CmsAccount {
   mustChangePassword: boolean;
   /** enabled == false: can't use the CMS until unblocked */
   blocked: boolean;
+  /** Super Admins only: a change another Super Admin asked them to confirm */
+  pendingAction?: PendingAdminAction;
 }
 
 export interface AddAccountInput {
@@ -220,7 +222,8 @@ export async function listCmsAccounts(): Promise<CmsAccount[]> {
         hasAccess: true,
         legacyManager: false,
         mustChangePassword: data.mustChangePassword === true,
-        blocked: data.enabled === false
+        blocked: data.enabled === false,
+        pendingAction: data.pendingAction || undefined
       });
     });
     qsaSnap.forEach((d) => {
@@ -363,11 +366,16 @@ export async function setAccountBlocked(account: CmsAccount, blocked: boolean): 
     return;
   }
   try {
-    await setDoc(
-      doc(db, 'admins', account.uid),
-      { enabled: !blocked, email: account.email || '', role: account.role },
-      { merge: true }
-    );
+    if (account.role === 'superadmin') {
+      // Only the 'enabled' field may change on a Super Admin's record (unblocking)
+      await updateDoc(doc(db, 'admins', account.uid), { enabled: !blocked });
+    } else {
+      await setDoc(
+        doc(db, 'admins', account.uid),
+        { enabled: !blocked, email: account.email || '', role: account.role },
+        { merge: true }
+      );
+    }
   } catch (e) {
     throw new Error(friendlyError(e));
   }
@@ -477,4 +485,86 @@ export async function setRequire2fa(value: boolean, byEmail: string): Promise<vo
 export function reset2faCommand(email: string): string {
   const projectId = getFirebaseHandles().firebaseConfig.projectId;
   return `npm run reset-2fa -- --email ${email}${projectId ? ` --project ${projectId}` : ''}`;
+}
+
+// ---------- Two-person rule for Super Admin accounts ----------
+
+/** Changes to another Super Admin go through their confirmation. */
+export function needsConfirmation(target: CmsAccount): boolean {
+  return target.role === 'superadmin';
+}
+
+export function describePendingAction(pa: PendingAdminAction, whose: 'your' | 'their' = 'their'): string {
+  if (pa.type === 'remove') return `remove ${whose} Super Admin account`;
+  if (pa.type === 'block') return `block ${whose} account`;
+  return `change ${whose} level to ${ROLE_INFO[pa.newRole || 'manager'].label}`;
+}
+
+/** Super Admin: ask another Super Admin to confirm removing / blocking / demoting them. */
+export async function requestSuperAdminAction(
+  target: CmsAccount,
+  type: PendingAdminAction['type'],
+  newRole: CmsRole | undefined,
+  me: { uid: string; email: string }
+): Promise<void> {
+  const { db } = getFirebaseHandles();
+  const pendingAction: Record<string, any> = {
+    type,
+    requestedBy: me.uid,
+    requestedByEmail: me.email,
+    requestedAt: db ? serverTimestamp() : new Date().toISOString()
+  };
+  if (type === 'role') pendingAction.newRole = newRole;
+  if (!db) {
+    const cur = previewAccounts.get(target.uid);
+    if (cur) cur.pendingAction = pendingAction as PendingAdminAction;
+    return;
+  }
+  try {
+    await updateDoc(doc(db, 'admins', target.uid), { pendingAction });
+  } catch (e: any) {
+    throw new Error(
+      e?.code === 'permission-denied'
+        ? 'Permission denied. Another Super Admin may already have a request waiting for this person, or the latest firestore.rules are not deployed.'
+        : friendlyError(e)
+    );
+  }
+}
+
+/** Super Admin: withdraw your own request. */
+export async function cancelSuperAdminAction(target: CmsAccount): Promise<void> {
+  const { db } = getFirebaseHandles();
+  if (!db) {
+    const cur = previewAccounts.get(target.uid);
+    if (cur) delete cur.pendingAction;
+    return;
+  }
+  try {
+    await updateDoc(doc(db, 'admins', target.uid), { pendingAction: deleteField() });
+  } catch (e) {
+    throw new Error(friendlyError(e));
+  }
+}
+
+/** The Super Admin concerned: approve or decline a request about their own account. */
+export async function answerMyPendingAction(pa: PendingAdminAction, approve: boolean): Promise<void> {
+  const { db, auth } = getFirebaseHandles();
+  const uid = auth?.currentUser?.uid;
+  if (!db || !uid) return; // preview mode
+  const ref = doc(db, 'admins', uid);
+  try {
+    if (!approve) {
+      await updateDoc(ref, { pendingAction: deleteField() });
+      return;
+    }
+    const batch = writeBatch(db);
+    // Old-style Manager marker would otherwise keep Manager access after a removal or step down
+    if (pa.type !== 'block') batch.delete(doc(db, 'qsaAdmins', uid));
+    if (pa.type === 'remove') batch.delete(ref);
+    else if (pa.type === 'block') batch.update(ref, { enabled: false, pendingAction: deleteField() });
+    else batch.update(ref, { role: pa.newRole, pendingAction: deleteField() });
+    await batch.commit();
+  } catch (e) {
+    throw new Error(friendlyError(e));
+  }
 }

@@ -83,7 +83,7 @@ service cloud.firestore {
     // Role documents written by Managers. Only these fields are allowed.
     function validRoleDoc() {
       let d = request.resource.data;
-      return d.keys().hasOnly(['enabled', 'email', 'name', 'role', 'mustChangePassword', 'tempPasswordHash', 'createdAt', 'createdBy'])
+      return d.keys().hasOnly(['enabled', 'email', 'name', 'role', 'mustChangePassword', 'tempPasswordHash', 'createdAt', 'createdBy', 'pendingAction'])
         && d.enabled is bool
         && d.email is string && d.email.size() <= 320
         && d.get('role', 'officer') in ['viewer', 'officer', 'manager', 'superadmin']
@@ -92,59 +92,138 @@ service cloud.firestore {
         && d.get('tempPasswordHash', '') is string && d.get('tempPasswordHash', '').size() <= 128;
     }
 
-    // CMS users. Managers add, change, block and remove Viewers and Officers; Super Admins
-    // can do this for everyone. Nobody can change or remove their own access (no lock-out).
+    function adminChanges() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function isSuperAdminDoc(data) {
+      return data.get('role', 'officer') == 'superadmin';
+    }
+
+    // ---- Two-person rule for Super Admin accounts ----
+    // Another Super Admin can only REQUEST to remove, block or change the level of a Super Admin
+    // (admins/{uid}.pendingAction). The Super Admin concerned must approve it themselves.
+
+    // A Super Admin asking (or re-asking) another Super Admin to confirm an action
+    function isPendingActionRequest(uid) {
+      let pa = request.resource.data.pendingAction;
+      return isSuperAdmin() && request.auth.uid != uid
+        && isSuperAdminDoc(resource.data)
+        && adminChanges().hasOnly(['pendingAction'])
+        && (!('pendingAction' in resource.data) || resource.data.pendingAction.requestedBy == request.auth.uid)
+        && pa.keys().hasOnly(['type', 'newRole', 'requestedBy', 'requestedByEmail', 'requestedAt'])
+        && pa.type in ['remove', 'block', 'role']
+        && (pa.type != 'role' || pa.get('newRole', '') in ['viewer', 'officer', 'manager'])
+        && pa.requestedBy == request.auth.uid
+        && pa.requestedByEmail is string && pa.requestedByEmail.size() <= 320
+        && pa.requestedAt == request.time;
+    }
+
+    // The requester withdrawing their own request
+    function isPendingActionCancel(uid) {
+      return isSuperAdmin() && request.auth.uid != uid
+        && adminChanges().hasOnly(['pendingAction'])
+        && !('pendingAction' in request.resource.data)
+        && resource.data.pendingAction.requestedBy == request.auth.uid;
+    }
+
+    // The request still comes from an active Super Admin
+    function pendingRequesterIsSuperAdmin() {
+      let requester = get(/databases/$(database)/documents/admins/$(resource.data.pendingAction.requestedBy)).data;
+      return requester.get('role', '') == 'superadmin' && requester.get('enabled', true) != false;
+    }
+
+    // The Super Admin concerned answering a request about their own account
+    function isOwnPendingActionAnswer(uid) {
+      let pa = resource.data.pendingAction;
+      let after = request.resource.data;
+      return isSignedIn() && request.auth.uid == uid
+        && 'pendingAction' in resource.data
+        && !('pendingAction' in after)
+        && (
+          // decline
+          adminChanges().hasOnly(['pendingAction'])
+          // approve block
+          || (pa.type == 'block' && pendingRequesterIsSuperAdmin()
+            && adminChanges().hasOnly(['pendingAction', 'enabled']) && after.enabled == false)
+          // approve change of level (always a step down from Super Admin)
+          || (pa.type == 'role' && pendingRequesterIsSuperAdmin()
+            && adminChanges().hasOnly(['pendingAction', 'role']) && after.role == pa.newRole)
+        );
+    }
+
+    // CMS users. Managers add, change, block and remove Viewers and Officers; Super Admins can
+    // do this for everyone, except that changes to another Super Admin need that Super Admin's
+    // confirmation (see above). Nobody can change or remove their own access directly.
     match /admins/{uid} {
       allow read: if isSignedIn() && (request.auth.uid == uid || isManager());
       allow create: if isManager() && request.auth.uid != uid && validRoleDoc()
+        && !('pendingAction' in request.resource.data)
         && (isSuperAdmin() || juniorRole(request.resource.data.get('role', 'officer')));
       allow update: if isManager() && request.auth.uid != uid && validRoleDoc()
-        && (isSuperAdmin()
+        && !adminChanges().hasAny(['pendingAction'])
+        && ((isSuperAdmin() && !isSuperAdminDoc(resource.data))
           || (juniorRole(request.resource.data.get('role', 'officer'))
             && juniorRole(resource.data.get('role', 'officer'))
             && !isLegacyManager(uid)));
+      // Unblocking a Super Admin needs no confirmation (they can't sign in to give it)
+      allow update: if isSuperAdmin() && request.auth.uid != uid && isSuperAdminDoc(resource.data)
+        && adminChanges().hasOnly(['enabled']) && request.resource.data.enabled == true;
+      allow update: if isPendingActionRequest(uid) || isPendingActionCancel(uid) || isOwnPendingActionAnswer(uid);
       // A user may only clear their own "must change password" flag (and the temporary
       // password fingerprint) once they use a password of their own
       allow update: if isSignedIn() && request.auth.uid == uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePassword', 'tempPasswordHash'])
+        && adminChanges().hasOnly(['mustChangePassword', 'tempPasswordHash'])
         && request.resource.data.mustChangePassword == false
         && !('tempPasswordHash' in request.resource.data);
       allow delete: if isManager() && request.auth.uid != uid
+        && !isSuperAdminDoc(resource.data)
         && (isSuperAdmin() || (juniorRole(resource.data.get('role', 'officer')) && !isLegacyManager(uid)));
+      // A Super Admin approving another Super Admin's request to remove them
+      allow delete: if isSignedIn() && request.auth.uid == uid
+        && isSuperAdminDoc(resource.data)
+        && resource.data.get('pendingAction', {'type': ''}).type == 'remove'
+        && pendingRequesterIsSuperAdmin();
     }
 
-    // Legacy Manager marker (older setups). New code stores the role on admins/{uid};
-    // Super Admins may only remove these docs (e.g. when changing an old Manager's role).
+    // Legacy Manager marker (older setups). New code stores the role on admins/{uid}.
+    // Super Admins may remove other people's; anyone may remove their own (it only lowers access).
     match /qsaAdmins/{uid} {
       allow read: if isSignedIn() && (request.auth.uid == uid || isManager());
       allow create, update: if false;
-      allow delete: if isSuperAdmin() && request.auth.uid != uid;
+      allow delete: if (isSuperAdmin() && request.auth.uid != uid) || (isSignedIn() && request.auth.uid == uid);
     }
 
     // Security settings: readable by signed-in users so the CMS knows whether 2FA is required.
-    // settings/announcement: the banner shown to everyone (public forms too), so anyone can
-    // read it; only Super Admins can write it.
-    function validAnnouncement() {
-      let d = request.resource.data;
-      return d.keys().hasOnly(['active', 'message', 'level', 'showUntil', 'updatedBy', 'updatedAt'])
-        && d.active is bool
-        && d.message is string && d.message.size() <= 500
-        && d.level in ['info', 'warning', 'critical']
-        && (!('showUntil' in d) || d.showUntil == null || d.showUntil is timestamp);
-    }
-
     // Super Admins can switch the 2FA requirement on or off from the CMS. Turning it ON is only
     // allowed from a session that itself used 2FA, which proves authenticator codes work for this
     // project (otherwise everyone could be locked out). The setup script can always change it.
     match /settings/{doc} {
-      allow read: if isSignedIn() || doc == 'announcement';
-      allow create, update: if doc == 'announcement' && isSuperAdmin() && validAnnouncement();
+      allow read: if isSignedIn();
       allow create, update: if doc == 'security'
         && isSuperAdmin()
         && request.resource.data.keys().hasOnly(['require2fa', 'updatedBy', 'updatedAt'])
         && request.resource.data.require2fa is bool
         && (request.resource.data.require2fa == false || has2fa());
       allow delete: if false;
+    }
+
+    // Announcement queue (e.g. scheduled maintenance): shown to everyone, public forms too,
+    // so anyone can read; only Super Admins can write.
+    function validAnnouncement() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['active', 'message', 'level', 'showFrom', 'showUntil', 'createdAt', 'updatedBy', 'updatedAt'])
+        && d.active is bool
+        && d.message is string && d.message.size() > 0 && d.message.size() <= 500
+        && d.level in ['info', 'notice', 'warning', 'critical']
+        && (!('showFrom' in d) || d.showFrom == null || d.showFrom is timestamp)
+        && (!('showUntil' in d) || d.showUntil == null || d.showUntil is timestamp);
+    }
+
+    match /announcements/{id} {
+      allow read: if true;
+      allow create, update: if isSuperAdmin() && validAnnouncement();
+      allow delete: if isSuperAdmin();
     }
 
     function reportChanges() {

@@ -101,6 +101,10 @@ Approved deletions **archive** the report: it disappears from the inbox but is k
 
 **User Accounts** (Managers and Super Admins): add a user with a level; the app creates their login with a temporary password and emails their login details from the company mailbox via Power Automate (`VITE_FLOW_URL_ACCOUNTS`, see `docs/POWER_AUTOMATE.md` section 5). They must choose their own password at first sign-in. Without that flow, Firebase emails a set-password link instead and the temporary password is shown to the Manager. **Block** stops access immediately but keeps the user listed (one click to unblock); **Remove** is for people who have left. Everyone can change their own password under **My Account**.
 
+**Super Admin two-person rule:** another Super Admin can only *request* to remove, block or change the level of a Super Admin. The Super Admin concerned sees the request at the top of the CMS and must **Approve** it (or Decline). Requests can be withdrawn. Unblocking a Super Admin needs no confirmation. If a Super Admin has left and can't answer, the Firebase project owner can delete their `admins/{uid}` document in the Firebase console.
+
+**Password changes:** after setting a password from an email link, or the first-sign-in "Set your own password" screen, users are taken to the sign-in page with their email filled in.
+
 ### Two-Step Sign-In (2FA)
 Authenticator-app codes (Google / Microsoft Authenticator), required for every CMS user and enforced by the security rules.
 
@@ -135,7 +139,7 @@ npm run setup:firebase -- --email you@zambiaairways.co.zm --action-url https://z
 - **Wrong report type:** Managers can use **Change type** on a case to move it (e.g. Hazard → Incident / Accident). The case number stays the same and the move is recorded.
 - **Search:** the box at the top of the CMS (shortcut `/`) searches every field of every case; all words must match.
 - **Urgent:** closed cases no longer show the flashing URGENT badge or count as Urgent Action.
-- **Announcement banner:** Super Admins set it under **CMS Configuration** (e.g. scheduled maintenance). It shows at the top of every page, including the public forms, until removed or until its "show until" time.
+- **Announcements:** Super Admins manage them under **CMS Configuration** (e.g. scheduled maintenance). Several can be live at once: the banner at the top of every page (public forms included) slides through them, most important first, each in its colour (Critical red, Maintenance orange, Notice black, Information green), with optional "show from" / "show until" times.
 - **Case-number email:** reporters can optionally enter an email address to receive their case number (Power Automate flow `VITE_FLOW_URL_RECEIPTS`, see `docs/POWER_AUTOMATE.md` section 6). The address is never stored with the report.
 
 ### Production Build & Firebase Deployment
