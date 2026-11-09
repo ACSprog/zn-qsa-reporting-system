@@ -50,6 +50,26 @@ export const INCIDENT_EXCEL_HEADERS: HeaderMapping[] = [
   { header: 'Supporting evidence / attachment reference', fieldKey: 'evidence' }
 ];
 
+/** Combined Incident / Accident form (sheet / table tblOccurrence) */
+export const OCCURRENCE_EXCEL_HEADERS: HeaderMapping[] = [
+  { header: 'Incident or Accident', fieldKey: 'occurrenceType' },
+  { header: 'Category', fieldKey: 'incidentType' },
+  { header: 'Briefly, what happened?', fieldKey: 'whatHappened' },
+  { header: 'What was happening immediately before the event?', fieldKey: 'before' },
+  { header: 'Phase of operation / activity', fieldKey: 'phase' },
+  { header: 'Aircraft / vehicle / equipment involved', fieldKey: 'equipment' },
+  { header: 'Persons involved / affected', fieldKey: 'personsInvolved' },
+  { header: 'What action was taken?', fieldKey: 'actionTaken' },
+  { header: 'Was the situation brought under control?', fieldKey: 'underControl' },
+  { header: 'Was anyone injured?', fieldKey: 'injured' },
+  { header: 'Known injury details', fieldKey: 'injuryDetails' },
+  { header: 'Known aircraft / equipment / property damage', fieldKey: 'damage' },
+  { header: 'Operational impact', fieldKey: 'operationalImpact' },
+  { header: 'Emergency procedures / services / evacuation', fieldKey: 'emergencyProcedures' },
+  { header: 'Was ATC / airport / another organisation involved?', fieldKey: 'atcInvolved' },
+  { header: 'Supporting evidence / attachment reference', fieldKey: 'evidence' }
+];
+
 export const ACCIDENT_EXCEL_HEADERS: HeaderMapping[] = [
   { header: 'Brief description of what happened', fieldKey: 'description' },
   { header: 'Accident location', fieldKey: 'accidentLocation' },
@@ -87,6 +107,9 @@ export function getExcelHeadersForForm(form: FormType): HeaderMapping[] {
   switch (form) {
     case 'hazard':
       specific = HAZARD_EXCEL_HEADERS;
+      break;
+    case 'occurrence':
+      specific = OCCURRENCE_EXCEL_HEADERS;
       break;
     case 'incident':
       specific = INCIDENT_EXCEL_HEADERS;

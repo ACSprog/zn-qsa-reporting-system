@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ArrowLeft, Home, ChevronRight } from 'lucide-react';
 import { FormType, ReportingType } from '../types';
 import { FORMS_META } from '../config/fields';
-import { FormRenderer } from '../components/FormRenderer';
+import { FormRenderer, CaseReceipt } from '../components/FormRenderer';
 import { ConfirmationScreen } from '../components/ConfirmationScreen';
 
 interface FormPageProps {
@@ -16,10 +16,12 @@ export const FormPage: React.FC<FormPageProps> = ({ form, onGoHome, onSelectForm
 
   const [submittedReportId, setSubmittedReportId] = useState<string | null>(null);
   const [submittedReporting, setSubmittedReporting] = useState<ReportingType>('Named');
+  const [receipt, setReceipt] = useState<CaseReceipt | undefined>(undefined);
 
-  const handleSuccess = (reportId: string, reporting: ReportingType) => {
+  const handleSuccess = (reportId: string, reporting: ReportingType, emailReceipt?: CaseReceipt) => {
     setSubmittedReportId(reportId);
     setSubmittedReporting(reporting);
+    setReceipt(emailReceipt);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -33,6 +35,7 @@ export const FormPage: React.FC<FormPageProps> = ({ form, onGoHome, onSelectForm
       <ConfirmationScreen
         reportId={submittedReportId}
         reporting={submittedReporting}
+        receipt={receipt}
         onNewReport={handleResetForNewReport}
         onGoHome={onGoHome}
       />

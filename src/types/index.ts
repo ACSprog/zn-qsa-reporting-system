@@ -1,4 +1,20 @@
-export type FormType = 'hazard' | 'incident' | 'accident' | 'concern';
+/**
+ * 'occurrence' is the combined Incident / Accident form (IA- case numbers).
+ * 'incident' and 'accident' are the old separate forms: no longer offered to reporters, but
+ * their records stay readable in the CMS.
+ */
+export type FormType = 'hazard' | 'occurrence' | 'incident' | 'accident' | 'concern';
+
+/** Forms reporters can submit today */
+export const ACTIVE_FORMS: FormType[] = ['hazard', 'occurrence', 'concern'];
+
+/** Every collection the CMS reads (includes the old separate incident/accident forms) */
+export const ALL_REPORT_FORMS: FormType[] = ['hazard', 'occurrence', 'incident', 'accident', 'concern'];
+
+/** Old INC/ACC records are shown together with the combined Incident / Accident cases */
+export function formGroup(form: FormType): FormType {
+  return form === 'incident' || form === 'accident' ? 'occurrence' : form;
+}
 
 export type ReportingType = 'Named' | 'Confidential' | 'Anonymous';
 
@@ -9,6 +25,15 @@ export type CmsRole = 'viewer' | 'officer' | 'manager' | 'superadmin';
 
 /** Manager and Super Admin share the Manager powers over reports */
 export const isManagerRole = (role: CmsRole | null | undefined) => role === 'manager' || role === 'superadmin';
+
+export interface ReclassificationRecord {
+  from: FormType;
+  to: FormType;
+  by: string;
+  byEmail: string;
+  at: any;
+  reason?: string;
+}
 
 export interface DeletionRequest {
   status: 'pending' | 'approved' | 'rejected';
@@ -58,6 +83,9 @@ export interface BaseReportData {
   evidenceCount: number;
   evidenceFolder: string;
   deletionRequest?: DeletionRequest;
+  /** Set by a Manager when the case was submitted under the wrong report type (number unchanged) */
+  reclassifiedTo?: FormType;
+  reclassification?: ReclassificationRecord;
   
   // Section 1: Common basic information
   reporting: ReportingType;
@@ -86,6 +114,8 @@ export interface FieldDefinition {
   options?: string[];
   placeholder?: string;
   hint?: string;
+  /** Only show (and require) this field when another field has the given value */
+  showWhen?: { field: string; equals: string };
 }
 
 export interface SyncResultPerForm {

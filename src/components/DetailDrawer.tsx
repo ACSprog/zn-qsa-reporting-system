@@ -38,8 +38,11 @@ import {
   fetchReporterIdentity,
   updateReportMetadata,
   requestReportDeletion,
-  decideDeletionRequest
+  decideDeletionRequest,
+  reclassifyReport
 } from '../lib/firebase';
+import { isOpenUrgent, isUsableLink, reportingLabel, effectiveForm } from '../lib/display';
+import { ACTIVE_FORMS, FormType } from '../types';
 import { triggerFileDownload } from '../lib/evidence';
 import { restoreReportToExcel } from '../lib/restoreToExcel';
 
@@ -74,6 +77,13 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
   const [deleteReason, setDeleteReason] = useState<string>('');
   const [deletionBusy, setDeletionBusy] = useState<boolean>(false);
   const [deletionMessage, setDeletionMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+
+  // Manager: move to the right report type (keeps the case number)
+  const [showMoveForm, setShowMoveForm] = useState<boolean>(false);
+  const [moveTo, setMoveTo] = useState<FormType | ''>('');
+  const [moveReason, setMoveReason] = useState<string>('');
+  const [moveBusy, setMoveBusy] = useState<boolean>(false);
+  const [moveMessage, setMoveMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [evidenceFiles, setEvidenceFiles] = useState<ProcessedEvidenceFile[]>([]);
   const [loadingEvidence, setLoadingEvidence] = useState<boolean>(false);
 
@@ -101,6 +111,10 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
     setShowDeleteForm(false);
     setDeleteReason('');
     setDeletionMessage(null);
+    setShowMoveForm(false);
+    setMoveTo('');
+    setMoveReason('');
+    setMoveMessage(null);
 
     // 1. Load evidence subcollection on drawer open ONLY (per spec)
     if (report.evidenceCount > 0) {
@@ -173,6 +187,28 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
   };
 
   const pendingRequest = report.deletionRequest?.status === 'pending' ? report.deletionRequest : null;
+  const currentType = effectiveForm(report);
+
+  const handleMove = async () => {
+    if (!currentUser || !moveTo) return;
+    if (!window.confirm(`Move ${report.reportId} from ${FORMS_META[currentType].title} to ${FORMS_META[moveTo].title}?\nThe case number stays the same.`)) return;
+    setMoveBusy(true);
+    setMoveMessage(null);
+    try {
+      const ok = await reclassifyReport(report, moveTo, moveReason, currentUser);
+      if (ok) {
+        setShowMoveForm(false);
+        setMoveTo('');
+        setMoveReason('');
+        setMoveMessage({ kind: 'ok', text: `Moved to ${FORMS_META[moveTo].title}. Case number unchanged.` });
+        onReportUpdated();
+      } else {
+        setMoveMessage({ kind: 'error', text: 'Could not move the case. You may not have permission.' });
+      }
+    } finally {
+      setMoveBusy(false);
+    }
+  };
 
   // Manager only: archive or restore directly
   const handleToggleArchive = async () => {
@@ -253,7 +289,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
               <span className="font-mono text-sm font-black text-[#F37C1C]">
                 {report.reportId}
               </span>
-              {report.urgent === 'Yes' && (
+              {isOpenUrgent(report) && (
                 <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-[#DE2010] text-white animate-pulse">
                   Urgent
                 </span>
@@ -265,7 +301,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
               )}
             </div>
             <h2 className="text-lg font-bold text-white mt-1">
-              {meta.title} Details
+              {FORMS_META[effectiveForm(report)].title} Details
             </h2>
           </div>
 
@@ -347,6 +383,78 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
             </div>
           )}
 
+          {/* Report type (Managers can move a case submitted under the wrong type) */}
+          <div className="border border-slate-200 rounded-xl p-4 bg-white space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="text-xs">
+                <span className="font-bold uppercase tracking-wider text-slate-500">Report type: </span>
+                <span className="font-black text-slate-900">{FORMS_META[currentType].title}</span>
+              </div>
+              {isManager && !report.deleted && !showMoveForm && (
+                <button
+                  type="button"
+                  onClick={() => setShowMoveForm(true)}
+                  className="text-xs font-bold px-2.5 py-1 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
+                >
+                  Change type
+                </button>
+              )}
+            </div>
+            {report.reclassification && (
+              <p className="text-[11px] text-slate-500">
+                Moved from {FORMS_META[report.reclassification.from]?.title || report.reclassification.from} by{' '}
+                {report.reclassification.byEmail || 'a Manager'}
+                {formatWhen(report.reclassification.at) && <> on {formatWhen(report.reclassification.at)}</>}
+                {report.reclassification.reason ? <>: {report.reclassification.reason}</> : '.'} The answers below are from the
+                original {FORMS_META[report.form].title} form.
+              </p>
+            )}
+            {showMoveForm && (
+              <div className="space-y-2 pt-1">
+                <select
+                  value={moveTo}
+                  onChange={(e) => setMoveTo(e.target.value as FormType)}
+                  className="w-full text-sm bg-white border border-slate-300 rounded-lg p-2"
+                >
+                  <option value="">Move to...</option>
+                  {ACTIVE_FORMS.filter((f) => f !== currentType).map((f) => (
+                    <option key={f} value={f}>
+                      {FORMS_META[f].title}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  maxLength={500}
+                  value={moveReason}
+                  onChange={(e) => setMoveReason(e.target.value)}
+                  placeholder="Reason (optional), e.g. reporter chose Hazard but an incident occurred"
+                  className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={!moveTo || moveBusy}
+                    onClick={handleMove}
+                    className="px-3 py-1.5 rounded-lg bg-[#1B8E44] hover:bg-[#147236] text-white text-xs font-bold disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {moveBusy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Move case
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowMoveForm(false)}
+                    className="px-3 py-1.5 rounded-lg text-slate-600 hover:bg-slate-100 text-xs font-bold"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {moveMessage && (
+              <p className={`text-[11px] ${moveMessage.kind === 'ok' ? 'text-emerald-700' : 'text-rose-700'}`}>{moveMessage.text}</p>
+            )}
+          </div>
+
           {/* Status & Review Controls */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
@@ -418,10 +526,10 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                 <User className="w-4 h-4 text-slate-500" />
-                Reporter Identity ({report.reporting})
+                Reporter Identity ({reportingLabel(report.reporting)})
               </span>
               <span className="text-xs font-semibold text-slate-500">
-                Mode: {report.reporting}
+                Mode: {reportingLabel(report.reporting)}
               </span>
             </div>
 
@@ -471,7 +579,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
                 Evidence Attachments ({report.evidenceCount || 0})
               </span>
 
-              {report.evidenceFolder && (
+              {isUsableLink(report.evidenceFolder) && (
                 <a
                   href={report.evidenceFolder}
                   target="_blank"

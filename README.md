@@ -129,6 +129,15 @@ npm run setup:firebase -- --email you@zambiaairways.co.zm --action-url https://z
 ```
 (Or Firebase console → Authentication → Templates → pencil → *Customize action URL* → `https://<site>/auth/action`.) The site must be deployed first. After resetting, users can continue straight into the CMS, and the "temporary password" label on User Accounts clears automatically at their next sign-in.
 
+### Report Types, Search and Announcements
+- **Report types:** Hazard (`HAZ-`), **Incident / Accident** (`IA-`, one combined form; the reporter says whether it was an incident or an accident) and Safety Concern (`SC-`). Old `INC-`/`ACC-` records still show in the CMS under Incidents / Accidents.
+- **"Open" reporting:** what used to be called "Named" is shown as **Open** everywhere (the stored value is still `Named`).
+- **Wrong report type:** Managers can use **Change type** on a case to move it (e.g. Hazard → Incident / Accident). The case number stays the same and the move is recorded.
+- **Search:** the box at the top of the CMS (shortcut `/`) searches every field of every case; all words must match.
+- **Urgent:** closed cases no longer show the flashing URGENT badge or count as Urgent Action.
+- **Announcement banner:** Super Admins set it under **CMS Configuration** (e.g. scheduled maintenance). It shows at the top of every page, including the public forms, until removed or until its "show until" time.
+- **Case-number email:** reporters can optionally enter an email address to receive their case number (Power Automate flow `VITE_FLOW_URL_RECEIPTS`, see `docs/POWER_AUTOMATE.md` section 6). The address is never stored with the report.
+
 ### Production Build & Firebase Deployment
 ```bash
 # Build production bundle

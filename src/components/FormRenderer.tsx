@@ -16,17 +16,25 @@ import {
 } from '../types';
 import {
   FORMS_META,
-  getFormFields
+  getFormFields,
+  isFieldVisible
 } from '../config/fields';
 import { REPORTING_TYPES } from '../config/options';
 import { generateReportId, stripIdentityIfAnonymous } from '../lib/idGenerator';
 import { EvidenceUpload } from './EvidenceUpload';
+import { isValidEmail, sendCaseReceipt } from '../lib/receipts';
+
+export interface CaseReceipt {
+  email: string;
+  /** false when the email flow isn't set up yet */
+  sent: boolean;
+}
 import { submitSafetyReport } from '../lib/firebase';
 import { ZambiaAirwaysLogo } from './ZambiaAirwaysLogo';
 
 interface FormRendererProps {
   form: FormType;
-  onSuccess: (reportId: string, reporting: ReportingType) => void;
+  onSuccess: (reportId: string, reporting: ReportingType, receipt?: CaseReceipt) => void;
   onCancel: () => void;
 }
 
@@ -61,6 +69,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const [evidenceFiles, setEvidenceFiles] = useState<ProcessedEvidenceFile[]>([]);
   const [honeypot, setHoneypot] = useState<string>(''); // Bot detection trap
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Optional address for the case number. Kept out of formData so it is never saved with the report.
+  const [receiptEmail, setReceiptEmail] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -104,7 +114,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     // Validate identity if NOT anonymous
     if (reporting !== 'Anonymous') {
       if (!formData.name || !formData.name.trim()) {
-        newErrors.name = 'Reporter Name is required for Named and Confidential reports.';
+        newErrors.name = 'Reporter Name is required for Open and Confidential reports.';
       }
     }
 
@@ -126,11 +136,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     if (!formData.notified) {
       newErrors.notified = 'Please specify if you notified anyone at the time.';
     }
+    if (receiptEmail.trim() && !isValidEmail(receiptEmail)) {
+      newErrors.receiptEmail = 'Check the email address, or leave it blank.';
+    }
 
     // Validate form specific fields
     const allFields = getFormFields(form);
     for (const field of allFields) {
-      if (field.section === 2 && field.required) {
+      if (field.section === 2 && field.required && isFieldVisible(field, formData)) {
         const val = formData[field.key];
         if (val === undefined || val === null || String(val).trim() === '') {
           newErrors[field.key] = `${field.label} is required.`;
@@ -166,10 +179,15 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     setIsSubmitting(true);
 
     try {
+      // Drop answers to questions that no longer apply (e.g. injury details after switching to "No")
+      const visibleData: Record<string, any> = { ...formData };
+      for (const f of getFormFields(form)) {
+        if (!isFieldVisible(f, formData)) delete visibleData[f.key];
+      }
       // Double guarantee: strip identity if anonymous
       const payloadData = stripIdentityIfAnonymous(
         {
-          ...formData,
+          ...visibleData,
           reporting
         },
         reporting
@@ -178,7 +196,11 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       const result = await submitSafetyReport(form, reportId, payloadData, evidenceFiles);
 
       if (result.success) {
-        onSuccess(reportId, reporting);
+        const email = receiptEmail.trim();
+        const receipt: CaseReceipt | undefined = email
+          ? { email, sent: sendCaseReceipt(email, reportId, form, reporting) }
+          : undefined;
+        onSuccess(reportId, reporting, receipt);
       } else {
         setSubmitError(result.error || 'Failed to submit report. Please try again.');
         setIsSubmitting(false);
@@ -190,7 +212,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   };
 
   // Extract form-specific fields for Section 2
-  const section2Fields = getFormFields(form).filter((f) => f.section === 2);
+  const section2Fields = getFormFields(form).filter((f) => f.section === 2 && isFieldVisible(f, formData));
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
@@ -760,6 +782,32 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               </div>
             </div>
           </section>
+
+          {/* Optional: email the case number (never stored with the report) */}
+          <div id="field-receiptEmail" className="rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5 space-y-2">
+            <label htmlFor="receiptEmail" className="block text-sm font-bold text-slate-800">
+              Email me my case number <span className="font-normal text-slate-500">(optional)</span>
+            </label>
+            <input
+              id="receiptEmail"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              value={receiptEmail}
+              onChange={(e) => setReceiptEmail(e.target.value)}
+              placeholder="you@example.com"
+              disabled={isSubmitting}
+              className={`w-full sm:max-w-md px-3 py-2.5 rounded-lg border text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B8E44]/40 ${
+                errors.receiptEmail ? 'border-rose-400' : 'border-slate-300'
+              }`}
+            />
+            {errors.receiptEmail && <p className="text-xs text-rose-600">{errors.receiptEmail}</p>}
+            <p className="text-xs text-slate-500">
+              {reporting === 'Anonymous'
+                ? 'Your report stays anonymous: the address is only used to send you the case number and is not saved with the report.'
+                : 'We send you the case number for your records. The address is not saved with the report.'}
+            </p>
+          </div>
 
           {/* Form Actions & Submission */}
           <div className="pt-6 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">

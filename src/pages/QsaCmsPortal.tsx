@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Lock,
@@ -57,10 +57,20 @@ import {
 import { DetailDrawer } from '../components/DetailDrawer';
 import { AccountsPanel } from '../components/AccountsPanel';
 import { ROLE_INFO } from '../lib/accounts';
+import {
+  isOpenUrgent,
+  reportingLabel,
+  reportGroup,
+  effectiveForm,
+  occurrenceKind,
+  searchableText,
+  matchesSearch
+} from '../lib/display';
 import { FirstLoginPasswordChange } from '../components/FirstLoginPasswordChange';
 import { TwoFactorRequired, isEnrolledIn2fa } from '../components/TwoFactorSetup';
 import type { MultiFactorResolver } from 'firebase/auth';
 import { SessionGuard, markCmsActivity, clearCmsActivity } from '../components/SessionGuard';
+import { AnnouncementEditor } from '../components/AnnouncementBanner';
 import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
 
 const ISSUER_LABEL = 'Zambia Airways QSA';
@@ -317,6 +327,27 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
     await handleSignOut();
   };
 
+  // Searchable text per case, rebuilt only when reports change
+  const searchIndex = useMemo(() => {
+    const m = new Map<string, string>();
+    reports.forEach((r) => m.set(`${r.form}/${r.reportId}`, searchableText(r, FORMS_META[effectiveForm(r)]?.title || r.form)));
+    return m;
+  }, [reports]);
+
+  // "/" jumps to the search box, like most web apps
+  const globalSearchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) && !t.isContentEditable) {
+        e.preventDefault();
+        globalSearchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // Filtered reports for Inbox
   const filteredReports = useMemo(() => {
     return reports.filter((r) => {
@@ -328,13 +359,13 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
       if (pendingDeletionOnly && r.deletionRequest?.status !== 'pending') return false;
 
       // Category filter
-      if (selectedCategoryTab !== 'all' && r.form !== selectedCategoryTab) return false;
+      if (selectedCategoryTab !== 'all' && reportGroup(r) !== selectedCategoryTab) return false;
 
       // Status filter
       if (statusFilter !== 'all' && r.status !== statusFilter) return false;
 
       // Urgency filter
-      if (urgentOnly && r.urgent !== 'Yes') return false;
+      if (urgentOnly && !isOpenUrgent(r)) return false;
 
       // Reporting filter
       if (reportingFilter !== 'all' && r.reporting !== reportingFilter) return false;
@@ -347,17 +378,10 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
       if (endDate && r.dateReported && r.dateReported > endDate) return false;
 
       // Search query
+      // Search every field of the case (all words must match)
       if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
-        const matchesId = r.reportId.toLowerCase().includes(query);
-        const matchesLoc = (r.location || '').toLowerCase().includes(query);
-        const matchesCat = (r.category || '').toLowerCase().includes(query);
-        const matchesFlight = (r.flightNo || '').toLowerCase().includes(query);
-        const matchesAircraft = (r.aircraftReg || '').toLowerCase().includes(query);
-        const matchesNotes = (r.notes || '').toLowerCase().includes(query);
-        if (!matchesId && !matchesLoc && !matchesCat && !matchesFlight && !matchesAircraft && !matchesNotes) {
-          return false;
-        }
+        const text = searchIndex.get(`${r.form}/${r.reportId}`) || '';
+        if (!matchesSearch(text, searchQuery)) return false;
       }
 
       return true;
@@ -399,8 +423,8 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
 
         return {
           'Report ID': r.reportId,
-          'Form Category': r.form.toUpperCase(),
-          'Reporting Type': r.reporting,
+          'Form Category': FORMS_META[effectiveForm(r)].title,
+          'Reporting Type': reportingLabel(r.reporting),
           'Date Reported': r.dateReported || '',
           'Event Date': r.eventDate || '',
           'Event Time': r.eventTime || '',
@@ -447,13 +471,13 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   const metrics = useMemo(() => {
     const total = reports.length;
     const newCount = reports.filter((r) => (r.status || 'New') === 'New').length;
-    const urgentCount = reports.filter((r) => r.urgent === 'Yes').length;
+    const urgentCount = reports.filter((r) => isOpenUrgent(r)).length;
     const underReview = reports.filter((r) => r.status === 'Under review' || r.status === 'Action required').length;
     const closedCount = reports.filter((r) => r.status === 'Closed').length;
-    const hazards = reports.filter((r) => r.form === 'hazard').length;
-    const incidents = reports.filter((r) => r.form === 'incident').length;
-    const accidents = reports.filter((r) => r.form === 'accident').length;
-    const concerns = reports.filter((r) => r.form === 'concern').length;
+    const hazards = reports.filter((r) => reportGroup(r) === 'hazard').length;
+    const incidents = reports.filter((r) => occurrenceKind(r) === 'Incident').length;
+    const accidents = reports.filter((r) => occurrenceKind(r) === 'Accident').length;
+    const concerns = reports.filter((r) => reportGroup(r) === 'concern').length;
     return { total, new: newCount, urgent: urgentCount, underReview, closed: closedCount, hazards, incidents, accidents, concerns };
   }, [reports]);
 
@@ -953,6 +977,29 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
             </span>
           </div>
 
+          {/* Search all cases (every field, every report type) */}
+          <div className="relative flex-1 max-w-md mx-2 hidden md:block">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              ref={globalSearchRef}
+              type="search"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                if (activeCmsTab !== 'inbox') setActiveCmsTab('inbox');
+                if (e.target.value && selectedCategoryTab !== 'all') setSelectedCategoryTab('all');
+              }}
+              placeholder="Search all cases: number, location, flight, words... ( / )"
+              className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1B8E44]/40"
+              aria-label="Search all cases"
+            />
+            {searchQuery.trim() && (
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-500 bg-white px-1.5 rounded">
+                {filteredReports.length} found
+              </span>
+            )}
+          </div>
+
           <div className="flex items-center gap-3">
             {backendMode === 'firestore' && !reportsError ? (
               <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
@@ -1071,8 +1118,8 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
               </div>
 
               <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
-                <span className="text-[11px] font-bold text-sky-600 uppercase tracking-wider block">Incidents</span>
-                <span className="text-2xl font-black text-sky-700 mt-0.5 block">{metrics.incidents}</span>
+                <span className="text-[11px] font-bold text-[#1E2522] uppercase tracking-wider block">Incidents</span>
+                <span className="text-2xl font-black text-[#1E2522] mt-0.5 block">{metrics.incidents}</span>
               </div>
 
               <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
@@ -1094,8 +1141,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                   {[
                     { id: 'all', label: 'All Reports' },
                     { id: 'hazard', label: 'Hazards (HAZ)' },
-                    { id: 'incident', label: 'Incidents (INC)' },
-                    { id: 'accident', label: 'Accidents (ACC)' },
+                    { id: 'occurrence', label: 'Incidents / Accidents (IA)' },
                     { id: 'concern', label: 'Concerns (SC)' }
                   ].map((tab) => (
                     <button
@@ -1141,7 +1187,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search ID, station, notes, flight..."
+                      placeholder="Search every field..."
                       className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-[#1B8E44]"
                     />
                   </div>
@@ -1170,7 +1216,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                       className="w-full py-1.5 px-3 text-xs rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-[#1B8E44] font-medium"
                     >
                       <option value="all">All Reporting Methods</option>
-                      <option value="Named">Named Reports</option>
+                      <option value="Named">Open Reports</option>
                       <option value="Confidential">Confidential Reports</option>
                       <option value="Anonymous">Anonymous Reports</option>
                     </select>
@@ -1265,15 +1311,25 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                           key={report.reportId}
                           onClick={() => setSelectedReport(report)}
                           className={`hover:bg-emerald-50/40 cursor-pointer transition-colors ${
-                            report.urgent === 'Yes' ? 'bg-rose-50/30' : ''
+                            isOpenUrgent(report) ? 'bg-rose-50/30' : ''
                           }`}
                         >
                           <td className="py-3.5 px-4 font-mono font-black text-slate-900">
                             {report.reportId}
                           </td>
                           <td className="py-3.5 px-4">
-                            <span className="font-mono text-[10px] font-black uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                              {report.form}
+                            <span
+                              className={`font-mono text-[10px] font-black uppercase px-2 py-0.5 rounded border ${
+                                occurrenceKind(report) === 'Accident'
+                                  ? 'bg-[#DE2010] text-white border-[#DE2010]'
+                                  : occurrenceKind(report) === 'Incident'
+                                    ? 'bg-[#1E2522] text-white border-[#1E2522]'
+                                    : 'bg-slate-100 text-slate-700 border-slate-200'
+                              }`}
+                              title={report.reclassifiedTo ? `Moved from ${FORMS_META[report.form].title}` : undefined}
+                            >
+                              {occurrenceKind(report) || FORMS_META[effectiveForm(report)].prefix}
+                              {report.reclassifiedTo ? ' *' : ''}
                             </span>
                           </td>
                           <td className="py-3.5 px-4">
@@ -1286,7 +1342,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                                   : 'bg-slate-100 text-slate-800'
                               }`}
                             >
-                              {report.reporting}
+                              {reportingLabel(report.reporting)}
                             </span>
                           </td>
                           <td className="py-3.5 px-4 text-slate-600 font-mono">
@@ -1299,9 +1355,13 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                             {report.flightNo ? report.flightNo : report.aircraftReg || '-'}
                           </td>
                           <td className="py-3.5 px-4">
-                            {report.urgent === 'Yes' ? (
+                            {isOpenUrgent(report) ? (
                               <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-[#DE2010] text-white animate-pulse">
                                 Urgent
+                              </span>
+                            ) : report.urgent === 'Yes' ? (
+                              <span className="text-[10px] font-bold text-slate-400" title="Was marked urgent; the case is closed">
+                                Urgent (closed)
                               </span>
                             ) : (
                               <span className="text-slate-400">No</span>
@@ -1390,7 +1450,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                     </div>
                     <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
                       <div
-                        className="bg-[#0284c7] h-full"
+                        className="bg-[#1E2522] h-full"
                         style={{ width: `${metrics.total ? (metrics.incidents / metrics.total) * 100 : 0}%` }}
                       />
                     </div>
@@ -1449,7 +1509,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                     <span>{reports.filter((r) => r.reporting === 'Confidential').length}</span>
                   </div>
                   <div className="flex items-center justify-between text-xs font-bold">
-                    <span>Named Reports</span>
+                    <span>Open Reports</span>
                     <span>{reports.filter((r) => r.reporting === 'Named').length}</span>
                   </div>
                 </div>
@@ -1518,6 +1578,8 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
               <h2 className="text-lg font-black text-slate-900">QSA CMS System Settings</h2>
               <p className="text-xs text-slate-500">System configuration, regulatory parameters, and compliance details</p>
             </div>
+
+            {role === 'superadmin' && <AnnouncementEditor currentEmail={currentUser?.email || ''} />}
 
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-6 space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">

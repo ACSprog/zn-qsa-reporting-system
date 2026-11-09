@@ -55,6 +55,8 @@ export function getCategoryForForm(form: FormType, data: Record<string, any>): s
   switch (form) {
     case 'hazard':
       return data.hazardCategory || '';
+    case 'occurrence':
+      return [data.occurrenceType, data.incidentType].filter(Boolean).join(': ');
     case 'incident':
       return data.incidentType || '';
     case 'concern':

@@ -17,6 +17,8 @@ import { ZambiaAirwaysLogo } from './ZambiaAirwaysLogo';
 interface ConfirmationScreenProps {
   reportId: string;
   reporting: ReportingType;
+  /** Set when the reporter asked for the case number by email */
+  receipt?: { email: string; sent: boolean };
   onNewReport: () => void;
   onGoHome: () => void;
 }
@@ -24,6 +26,7 @@ interface ConfirmationScreenProps {
 export const ConfirmationScreen: React.FC<ConfirmationScreenProps> = ({
   reportId,
   reporting,
+  receipt,
   onNewReport,
   onGoHome
 }) => {
@@ -91,6 +94,23 @@ export const ConfirmationScreen: React.FC<ConfirmationScreenProps> = ({
           </div>
         </div>
 
+        {receipt && (
+          <div
+            className={`max-w-md mx-auto -mt-2 mb-6 text-xs px-3.5 py-2.5 rounded-lg border ${
+              receipt.sent ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'
+            }`}
+          >
+            {receipt.sent ? (
+              <>
+                We're emailing this case number to <strong>{receipt.email}</strong>. It can take a few minutes; check your spam
+                folder if it doesn't arrive.
+              </>
+            ) : (
+              <>Email delivery isn't set up yet, so please copy or write down your case number now.</>
+            )}
+          </div>
+        )}
+
         {/* Protection Note */}
         <div className="flex items-center justify-center gap-2 text-xs text-slate-500 mb-8">
           {reporting === 'Anonymous' ? (
@@ -106,7 +126,7 @@ export const ConfirmationScreen: React.FC<ConfirmationScreenProps> = ({
           ) : (
             <div className="flex items-center gap-1.5 text-slate-700 bg-slate-100 px-3.5 py-2 rounded-lg border border-slate-200">
               <UserCheck className="w-4 h-4 shrink-0" />
-              <span>Named Report • Associated with your reporter details</span>
+              <span>Open Report • Associated with your reporter details</span>
             </div>
           )}
         </div>

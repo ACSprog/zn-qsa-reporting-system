@@ -12,7 +12,7 @@ When a safety report is submitted from the web application:
 3. Power Automate performs:
    - Shared secret token & duplicate verification.
    - Saves evidence attachments into SharePoint Online (`/Safety Evidence/{reportId}`).
-   - Appends a new row to the corresponding Excel table (`tblHazard`, `tblIncident`, `tblAccident`, or `tblConcern`).
+   - Appends a new row to the corresponding Excel table (`tblHazard`, `tblOccurrence` or `tblConcern`).
    - Looks up recipient routing in `tblRouting`.
    - Sends notification emails to the responsible QSA safety officer with strict confidentiality/anonymity protections.
 
@@ -23,25 +23,35 @@ When a safety report is submitted from the web application:
 ### A. Excel Online Workbook Setup
 Create a single Excel workbook named `Safety Reports.xlsx` stored in your organization's SharePoint Documents or designated Service Account OneDrive.
 
-Inside this workbook, create five sheets with official Excel Tables (press `Ctrl + T` to convert the ranges to named tables):
+Inside this workbook, create sheets with official Excel Tables (press `Ctrl + T` to convert the ranges to named tables).
+
+> **Incident and Accident are now one form.** New cases use the combined **Incident / Accident** form (case numbers `IA-…`, form value `occurrence`, table `tblOccurrence`, flow URL `VITE_FLOW_URL_OCCURRENCE`). `tblIncident` / `tblAccident` and their flows are only needed if you already have old INC-/ACC- records to restore. The `Reporting` column receives **Open**, Confidential or Anonymous ("Open" was called "Named" before).
 
 1. **`tblHazard`** (Sheet: `Hazard`)
    Headers:
    `Report ID`, `Date Reported`, `Reporting`, `Reporter Name`, `Department / Work Area`, `Position / Role`, `Contact`, `Date of Event / Observation`, `Time (if known)`, `Location / Station`, `Flight No. (if applicable)`, `Aircraft Registration (if applicable)`, `Aircraft Type (if applicable)`, `Does it require urgent attention?`, `Is anyone currently exposed to immediate risk?`, `Did you notify anyone at the time?`, `Person / department notified (if applicable)`, `Hazard Group`, `Hazard Category`, `Where was the hazard identified?`, `What is the hazard?`, `What could happen if it is not controlled?`, `Who / what could be affected?`, `Existing control or safeguard (if known)`, `Action you took immediately (if any)`, `Supporting evidence / attachment reference`, `Evidence Files`, `Evidence Folder`
 
-2. **`tblIncident`** (Sheet: `Incident`)
+2. **`tblOccurrence`** (Sheet: `Incident-Accident`): the combined form
+   Headers:
+   `Report ID`, `Date Reported`, `Reporting`, `Reporter Name`, `Department / Work Area`, `Position / Role`, `Contact`, `Date of Event / Observation`, `Time (if known)`, `Location / Station`, `Flight No. (if applicable)`, `Aircraft Registration (if applicable)`, `Aircraft Type (if applicable)`, `Does it require urgent attention?`, `Is anyone currently exposed to immediate risk?`, `Did you notify anyone at the time?`, `Person / department notified (if applicable)`, `Incident or Accident`, `Category`, `Briefly, what happened?`, `What was happening immediately before the event?`, `Phase of operation / activity`, `Aircraft / vehicle / equipment involved`, `Persons involved / affected`, `What action was taken?`, `Was the situation brought under control?`, `Was anyone injured?`, `Known injury details`, `Known aircraft / equipment / property damage`, `Operational impact`, `Emergency procedures / services / evacuation`, `Was ATC / airport / another organisation involved?`, `Supporting evidence / attachment reference`, `Evidence Files`, `Evidence Folder`
+
+   Payload keys for those columns: `occurrenceType`, `incidentType`, `whatHappened`, `before`, `phase`, `equipment`, `personsInvolved`, `actionTaken`, `underControl`, `injured`, `injuryDetails`, `damage`, `operationalImpact`, `emergencyProcedures`, `atcInvolved`, `evidence`. `category` arrives as e.g. `Accident: Ground handling`.
+
+   *Old forms (only if you have INC-/ACC- records):*
+
+   **`tblIncident`** (Sheet: `Incident`)
    Headers:
    `Report ID`, `Date Reported`, `Reporting`, `Reporter Name`, `Department / Work Area`, `Position / Role`, `Contact`, `Date of Event / Observation`, `Time (if known)`, `Location / Station`, `Flight No. (if applicable)`, `Aircraft Registration (if applicable)`, `Aircraft Type (if applicable)`, `Does it require urgent attention?`, `Is anyone currently exposed to immediate risk?`, `Did you notify anyone at the time?`, `Person / department notified (if applicable)`, `Incident Type / Category`, `Briefly, what happened?`, `What was happening immediately before the event?`, `What action was taken?`, `Was the situation brought under control?`, `Was there injury or damage?`, `Operational impact`, `Were emergency procedures used?`, `Was ATC / airport / another organisation involved?`, `Supporting evidence / attachment reference`, `Evidence Files`, `Evidence Folder`
 
-3. **`tblAccident`** (Sheet: `Accident`)
+   **`tblAccident`** (Sheet: `Accident`)
    Headers:
    `Report ID`, `Date Reported`, `Reporting`, `Reporter Name`, `Department / Work Area`, `Position / Role`, `Contact`, `Date of Event / Observation`, `Time (if known)`, `Location / Station`, `Flight No. (if applicable)`, `Aircraft Registration (if applicable)`, `Aircraft Type (if applicable)`, `Does it require urgent attention?`, `Is anyone currently exposed to immediate risk?`, `Did you notify anyone at the time?`, `Person / department notified (if applicable)`, `Brief description of what happened`, `Accident location`, `Phase of operation / activity`, `Aircraft / vehicle / equipment involved`, `Persons involved / affected`, `Was anyone injured?`, `Known injury details`, `Known aircraft / equipment / property damage`, `Emergency services / evacuation / rescue involved?`, `Immediate action taken`, `Supporting evidence`, `Evidence Files`, `Evidence Folder`
 
-4. **`tblConcern`** (Sheet: `Concern`)
+3. **`tblConcern`** (Sheet: `Concern`)
    Headers:
    `Report ID`, `Date Reported`, `Reporting`, `Reporter Name`, `Department / Work Area`, `Position / Role`, `Contact`, `Date of Event / Observation`, `Time (if known)`, `Location / Station`, `Flight No. (if applicable)`, `Aircraft Registration (if applicable)`, `Aircraft Type (if applicable)`, `Does it require urgent attention?`, `Is anyone currently exposed to immediate risk?`, `Did you notify anyone at the time?`, `Person / department notified (if applicable)`, `Concern Category`, `What is the safety concern?`, `Where / in which activity does it exist?`, `How long has it existed, if known?`, `Is it recurring?`, `Who / what could be affected?`, `What could happen if it is not addressed?`, `Have you raised it before?`, `What do you think could improve the situation?`, `Supporting evidence / attachment reference`, `Evidence Files`, `Evidence Folder`
 
-5. **`tblRouting`** (Sheet: `Routing`)
+4. **`tblRouting`** (Sheet: `Routing`)
    Headers:
    `Form`, `Category`, `Email`
 
@@ -49,8 +59,9 @@ Inside this workbook, create five sheets with official Excel Tables (press `Ctrl
    - `hazard` | `Flight Operations` | `qsa.flightops@zambiaairways.co.zm`
    - `hazard` | `Ground Operations` | `qsa.ground@zambiaairways.co.zm`
    - `hazard` | *(blank)* | `qsa@zambiaairways.co.zm`
-   - `incident`| *(blank)* | `incident.desk@zambiaairways.co.zm`
-   - `accident`| *(blank)* | `emergency.director@zambiaairways.co.zm`
+   - `occurrence` | `Accident: ` *(any accident)* | `emergency.director@zambiaairways.co.zm`
+   - `occurrence` | *(blank)* | `incident.desk@zambiaairways.co.zm`
+   (Tip: route on `occurrenceType` = `Accident` to reach the emergency contacts first.)
    - `concern` | *(blank)* | `qsa@zambiaairways.co.zm`
 
 ### B. SharePoint Online Evidence Library
@@ -196,7 +207,7 @@ Add **Office 365 Outlook — Send an email (V2)**:
   - **Confidentiality / Anonymity Enforced:**
     - If `reporting == 'Anonymous'`: Do NOT display any reporter details.
     - If `reporting == 'Confidential'`: Do NOT display reporter name or contact in the email (QSA review in dashboard only).
-    - If `reporting == 'Named'`: Reporter name and department may be listed.
+    - If `reporting == 'Open'` (older payloads: `'Named'`): Reporter name and department may be listed.
 
 ### Step 9: Error Handling Scope
 Enclose steps 4–8 in a **Scope** named `Try_Processing`.
@@ -269,3 +280,55 @@ Send from the QSA shared mailbox if you have one (**Send an email from a shared 
 
 ### Step 5: Run history hygiene
 Flow run history stores the temporary password. In the trigger's **Settings**, turn on **Secure Inputs** (and **Secure Outputs** on the email action) so it is hidden from run history.
+
+---
+
+## 6. Case-Number Email Flow (reporters, optional)
+
+On every form, reporters can type an email address to receive their case number. The app sends **only** the address, the case number and the report type to this flow; the address is never saved in Firestore, so anonymous reports stay anonymous in the database.
+
+### Step 1: Trigger: When an HTTP request is received
+- **Who can trigger the flow:** `Anyone`
+- **Request Body JSON Schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "token": { "type": "string" },
+    "type": { "type": "string" },
+    "email": { "type": "string" },
+    "reportId": { "type": "string" },
+    "formTitle": { "type": "string" },
+    "reporting": { "type": "string" },
+    "submittedAt": { "type": "string" }
+  }
+}
+```
+- Copy the generated **HTTP URL** into `VITE_FLOW_URL_RECEIPTS` (same `VITE_FLOW_TOKEN`), rebuild and redeploy.
+- In the trigger's **Settings**, turn on **Secure Inputs** so addresses don't sit in run history (important for anonymous reporters).
+
+### Step 2: Safety checks (Condition) — required
+Terminate (Cancelled) unless **all** are true:
+- `triggerBody()?['token']` equals your secret token
+- `triggerBody()?['type']` equals `case-receipt`
+- `length(triggerBody()?['reportId'])` is less than or equal to `30`
+- `length(triggerBody()?['email'])` is less than or equal to `254`
+
+Optional: to stop the form being used to email strangers, also require the address to end with `@zambiaairways.co.zm` (only if all reporters are staff).
+
+### Step 3: Send an email (V2)
+- **To:** `triggerBody()?['email']`
+- **Subject:** `Your Zambia Airways safety report: @{triggerBody()?['reportId']}`
+- **Body:** keep it to the case number and type. Never include report details:
+```html
+<p>Thank you for your report.</p>
+<p><b>Case number:</b> @{triggerBody()?['reportId']}<br/>
+<b>Report type:</b> @{triggerBody()?['formTitle']}</p>
+<p>Keep this number if you need to contact QSA about your report.</p>
+```
+
+---
+
+## 7. Cases moved to another report type
+
+A Manager can move a case submitted under the wrong type (e.g. Hazard → Incident / Accident). The case **keeps its number and its row in the original Excel table**; the CMS stores `reclassifiedTo` and a record of who moved it. If you also want it on the new sheet, add the row manually or filter the original sheet on the CMS export.

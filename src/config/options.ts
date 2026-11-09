@@ -79,8 +79,8 @@ export const RECURRING_OPTIONS = ['Yes', 'No', 'Not sure'];
 export const REPORTING_TYPES = [
   {
     value: 'Named',
-    label: 'Named',
-    description: 'Your details are recorded with the report.'
+    label: 'Open',
+    description: 'Your name and details are recorded with the report.'
   },
   {
     value: 'Confidential',
