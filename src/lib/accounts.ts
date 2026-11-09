@@ -16,7 +16,6 @@ import {
   inMemoryPersistence,
   connectAuthEmulator,
   createUserWithEmailAndPassword,
-  sendPasswordResetEmail,
   signOut,
   EmailAuthProvider,
   reauthenticateWithCredential,
@@ -33,7 +32,7 @@ import {
   deleteField,
   serverTimestamp
 } from 'firebase/firestore';
-import { getFirebaseHandles, usingEmulators, tempPasswordFingerprint, withCmsContinueLink } from './firebase';
+import { getFirebaseHandles, usingEmulators, tempPasswordFingerprint, sendPasswordLinkEmail } from './firebase';
 import { CmsRole, PendingAdminAction } from '../types';
 
 export const ROLE_INFO: Record<CmsRole, { label: string; description: string }> = {
@@ -331,7 +330,7 @@ export async function addCmsAccount(input: AddAccountInput, invitedByEmail: stri
     return { uid, createdLogin, emailVia: 'none' };
   }
   try {
-    await withCmsContinueLink((settings) => sendPasswordResetEmail(auth, email, settings));
+    await sendPasswordLinkEmail(email);
     return { uid, createdLogin, tempPassword, emailVia: 'firebase' };
   } catch (e) {
     return { uid, createdLogin, tempPassword, emailVia: 'none', emailError: friendlyError(e) };
@@ -406,7 +405,7 @@ export async function sendAccountPasswordReset(email: string): Promise<void> {
   const { auth } = getFirebaseHandles();
   if (!auth) return; // preview mode
   try {
-    await withCmsContinueLink((settings) => sendPasswordResetEmail(auth, email.trim().toLowerCase(), settings));
+    await sendPasswordLinkEmail(email);
   } catch (e) {
     throw new Error(friendlyError(e));
   }
@@ -430,6 +429,33 @@ export async function changeOwnPassword(currentPassword: string, newPassword: st
     await updateDoc(doc(db, 'admins', user.uid), { mustChangePassword: false, tempPasswordHash: deleteField() });
   } catch {
     // Flag may not exist (older accounts) or the user has no admins doc; the password is changed either way
+  }
+}
+
+/**
+ * Sets a new password for the user who has just signed in through an e-mailed link
+ * (no current password needed: the link itself proved they own the mailbox).
+ */
+export async function setOwnPasswordAfterEmailLink(newPassword: string): Promise<void> {
+  if (newPassword.length < 8) throw new Error('Use at least 8 characters for the new password.');
+  const { auth, db } = getFirebaseHandles();
+  const user = auth?.currentUser;
+  if (!user) throw new Error('The link sign-in has ended. Open the link from the email again, or ask for a new one.');
+  try {
+    await updatePassword(user, newPassword);
+  } catch (e) {
+    throw new Error(friendlyError(e));
+  }
+  if (db) {
+    try {
+      // Don't let a slow/offline database hold up the screen: the password is already changed
+      await Promise.race([
+        updateDoc(doc(db, 'admins', user.uid), { mustChangePassword: false, tempPasswordHash: deleteField() }),
+        new Promise((resolve) => setTimeout(resolve, 6000))
+      ]);
+    } catch {
+      // No admins doc / flag: the password is changed either way
+    }
   }
 }
 
