@@ -49,6 +49,7 @@ import {
   signOutUser,
   subscribeToAuthState,
   verifyUserRoles,
+  LOCKED_MESSAGE,
   fetchReporterIdentity,
   completeMfaSignIn,
   subscribeMyAdminRecord,
@@ -70,11 +71,11 @@ import {
   matchesSearch
 } from '../lib/display';
 import { FirstLoginPasswordChange } from '../components/FirstLoginPasswordChange';
-import { TwoFactorRequired, isEnrolledIn2fa } from '../components/TwoFactorSetup';
+import { TwoFactorRequired, isEnrolledIn2fa, removeOwnAuthenticator } from '../components/TwoFactorSetup';
 import type { MultiFactorResolver } from 'firebase/auth';
 import { SessionGuard, markCmsActivity, clearCmsActivity } from '../components/SessionGuard';
 import { AnnouncementEditor } from '../components/AnnouncementBanner';
-import { takeLoginNotice } from '../components/PasswordUI';
+import { takeLoginNotice, setLoginNotice } from '../components/PasswordUI';
 import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
 
 const ISSUER_LABEL = 'Zambia Airways QSA';
@@ -175,9 +176,11 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
         const roles = await verifyUserRoles(user);
         if (!roles.isAdmin) {
           setAuthError(
-            roles.blocked
-              ? 'Your account has been blocked. Contact a QSA Manager if you think this is a mistake.'
-              : 'Access Denied: Your account is not authorized as a Zambia Airways safety administrator.'
+            roles.locked
+              ? LOCKED_MESSAGE
+              : roles.blocked
+                ? 'Your account has been blocked. Contact a QSA Manager if you think this is a mistake.'
+                : 'Access Denied: Your account is not authorized as a Zambia Airways safety administrator.'
           );
           await signOutUser();
           setIsAdmin(false);
@@ -194,6 +197,20 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
           if (typeof (user as any).getIdTokenResult === 'function') {
             const token = await (user as any).getIdTokenResult();
             setSession2fa(Boolean(token.signInSecondFactor));
+            // A Super Admin switched 2FA off for this user: remove their authenticator now
+            // (they have just signed in, so Firebase allows it) so it isn't asked for again.
+            if (roles.twoFactorOff && isEnrolledIn2fa(user as any)) {
+              try {
+                await removeOwnAuthenticator(user as any);
+                // Firebase ends the session when the factor it used is removed: start clean
+                setLoginNotice('Two-step sign-in has been switched off for your account by a Super Admin. Sign in again with just your password.', user.email || undefined);
+                await signOutUser();
+                setIsVerifyingAuth(false);
+                return;
+              } catch (e) {
+                console.warn('Could not remove the authenticator:', e);
+              }
+            }
             setEnrolled2fa(isEnrolledIn2fa(user as any));
           } else {
             setSession2fa(false);
@@ -1676,6 +1693,11 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
             currentEmail={currentUser?.email || ''}
             canManage={isManager}
             myRole={role}
+            onPasswordChanged={async () => {
+              // Same as everywhere else: after a password change, sign in again with the new one
+              setLoginNotice('Your password has been changed. Sign in with your new password.', currentUser?.email || undefined);
+              await handleSignOut();
+            }}
             onTwoFactorEnrolled={async () => {
               window.alert('2FA is now on. Please sign in again: after your password you will be asked for the code from your app.');
               await handleSignOut();

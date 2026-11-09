@@ -16,7 +16,7 @@
  * Options:
  *   --password <pw>     Only needed when the login doesn't exist yet
  *   --enable-2fa        Turn on and require authenticator-app 2FA (see 5.)
- *   --relax-2fa         Stop requiring 2FA (emergency; users who set it up still use it)
+ *   --relax-2fa         Stop requiring 2FA for everyone (emergency only; per-person: "Stop 2FA" in the CMS)
  *   --action-url <url>  Send password-reset / verification links to the app's own branded page,
  *                       e.g. https://zn-qsa-reporting-system-test.web.app (adds /auth/action)
  *   --project <id>      Firebase project ID (default: VITE_FIREBASE_PROJECT_ID from .env.local)

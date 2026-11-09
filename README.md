@@ -113,12 +113,16 @@ npm run setup:firebase -- --email you@zambiaairways.co.zm --enable-2fa
 ```
 This upgrades the project to *Firebase Authentication with Identity Platform* (free on the Spark plan, up to 3,000 daily active users), turns on authenticator-app 2FA, and sets `settings/security.require2fa = true`. At their next sign-in each user verifies their email, scans a QR code and confirms a code; after that, sign-in asks for the 6-digit code after the password.
 
-- **Super Admin controls** (User Accounts → Security): switch **Require 2FA for everyone** on or off. Turning it on is only allowed from a session that itself used 2FA, so nobody can lock everyone out with a project where authenticator codes don't work.
-- **Lost phone:** a Super Admin clicks **Reset 2FA** on the user's row to get the exact command, e.g. `npm run reset-2fa -- --email person@zambiaairways.co.zm --project <project-id>`, and runs it from a computer with this repo and the Firebase CLI signed in as the project owner. (Doing it with one click from the browser would need a Cloud Function, i.e. the Blaze plan.) The user sets 2FA up again at next sign-in.
+- **Super Admin controls** (User Accounts → Security): switch **Require 2FA for everyone** on. Turning it on is only allowed from a session that itself used 2FA, so nobody can lock everyone out with a project where authenticator codes don't work. There is no "off for everyone" button in the CMS.
+- **Stop 2FA for one person** (Super Admins only, not for themselves): **Stop 2FA** on the user's row sets `admins/{uid}.twoFactorOff`. They then sign in with just their password; if they had an authenticator app, it is asked for once more at their next sign-in and then removed. **Turn 2FA back on** reverses it.
+- **Lost phone:** a Super Admin clicks **Lost phone** on the user's row to get the exact command, e.g. `npm run reset-2fa -- --email person@zambiaairways.co.zm --project <project-id>`, and runs it from a computer with this repo and the Firebase CLI signed in as the project owner. (Doing it with one click from the browser would need a Cloud Function, i.e. the Blaze plan.) The user sets 2FA up again at next sign-in.
 - **Emergency** (no Super Admin can sign in): `npm run setup:firebase -- --email you@... --relax-2fa` stops requiring 2FA.
 - The local emulators don't support authenticator-app 2FA, so it is never required there.
 
 These features need the current `firestore.rules` deployed: `firebase deploy --only firestore:rules` (the setup script does this).
+
+### Wrong-password lockout
+After **5 wrong passwords** in a row the account is locked (`signInLocks/{email}`), and the sign-in page tells the user to contact a Manager or Super Admin. "Forgot password?" is also refused while locked. A Manager or Super Admin unlocks it with **Unlock & send password reset mail** on the user's row. The security rules refuse a locked account access even if the password is later guessed. A successful sign-in clears the count.
 
 ### CMS Sessions
 - Signed out after **15 minutes without activity** (60-second "Are you still there?" warning first). Activity in any CMS tab counts.

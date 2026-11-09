@@ -16,7 +16,9 @@ import {
   Ban,
   CircleCheck,
   ShieldOff,
-  Lock
+  Lock,
+  LockOpen,
+  Smartphone
 } from 'lucide-react';
 import {
   CmsAccount,
@@ -39,6 +41,7 @@ import {
   ALL_ROLES,
   getRequire2fa,
   setRequire2fa,
+  setAccountTwoFactorOff,
   reset2faCommand
 } from '../lib/accounts';
 import { CmsRole } from '../types';
@@ -102,14 +105,13 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
       .catch(() => setRequire2faState(null));
   }, [isSuperAdmin]);
 
-  const toggleRequire2fa = async () => {
-    if (require2fa === null) return;
-    const next = !require2fa;
+  // 2FA can only be switched ON for everyone here; it is stopped per person (row buttons)
+  const turnOnRequire2fa = async () => {
+    if (require2fa !== false) return;
+    const next = true;
     if (
       !window.confirm(
-        next
-          ? 'Require 2FA for every CMS user?\n\nAnyone without an authenticator app set up will be asked to set one up at their next sign-in, and cannot see reports until they do.'
-          : 'Stop requiring 2FA?\n\nUse this only in an emergency (e.g. people locked out). Users who already set up 2FA will still be asked for their code.'
+        'Require 2FA for every CMS user?\n\nAnyone without an authenticator app set up will be asked to set one up at their next sign-in, and cannot see reports until they do. You can still switch it off for individual people.'
       )
     )
       return;
@@ -120,9 +122,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
       setRequire2faState(next);
       setSecurityNotice({
         kind: 'ok',
-        text: next
-          ? '2FA is now required. Users set it up at their next sign-in; anyone signed in without it must sign in again.'
-          : '2FA is no longer required.'
+        text: '2FA is now required. Users set it up at their next sign-in; anyone signed in without it must sign in again.'
       });
     } catch (e: any) {
       setSecurityNotice({ kind: 'error', text: e.message });
@@ -214,8 +214,42 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
     setBusyUid(acc.uid);
     setListNotice(null);
     try {
-      await sendAccountPasswordReset(acc.email);
-      setListNotice({ kind: 'ok', text: `Password reset email sent to ${acc.email}. The link lets them choose a new password (ask them to check spam).` });
+      const wasLocked = await sendAccountPasswordReset(acc.email);
+      setListNotice({
+        kind: 'ok',
+        text: `Password reset email sent to ${acc.email}. The link lets them choose a new password (ask them to check spam).${
+          wasLocked ? ' Their account was locked after 5 wrong passwords and is now unlocked.' : ''
+        }`
+      });
+      if (wasLocked || acc.failedAttempts) await refresh();
+    } catch (e: any) {
+      setListNotice({ kind: 'error', text: e.message });
+    } finally {
+      setBusyUid(null);
+    }
+  };
+
+  // Super Admin: stop (or restore) two-step sign-in for one person
+  const handleTwoFactorToggle = async (acc: CmsAccount) => {
+    const who = acc.name || acc.email || acc.uid;
+    const off = !acc.twoFactorOff;
+    if (
+      !window.confirm(
+        off
+          ? `Stop 2FA for ${who}?\n\nThey will sign in with just their password. If they already use an authenticator app, it is asked for one last time at their next sign-in and then removed.\n\nIf their phone is lost they can't give that last code: use "Lost phone" instead.`
+          : `Turn 2FA back on for ${who}?\n\nWhile 2FA is required for everyone, they will be asked to set up their authenticator app at their next sign-in.`
+      )
+    )
+      return;
+    setBusyUid(acc.uid);
+    setListNotice(null);
+    try {
+      await setAccountTwoFactorOff(acc, off);
+      setListNotice({
+        kind: 'ok',
+        text: off ? `2FA stopped for ${who}. Only their account is affected.` : `2FA is back on for ${who}.`
+      });
+      await refresh();
     } catch (e: any) {
       setListNotice({ kind: 'error', text: e.message });
     } finally {
@@ -363,31 +397,26 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                 {require2fa === null ? (
                   'checking...'
                 ) : require2fa ? (
-                  <strong className="text-emerald-700">Required</strong>
+                  <>
+                    <strong className="text-emerald-700">Required</strong>. To stop it for one person, use{' '}
+                    <strong>Stop 2FA</strong> on their row below.
+                  </>
                 ) : (
                   <strong className="text-amber-700">Not required</strong>
                 )}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={toggleRequire2fa}
-              disabled={savingSecurity || require2fa === null}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold disabled:opacity-50 ${
-                require2fa
-                  ? 'border border-amber-300 text-amber-800 hover:bg-amber-50'
-                  : 'bg-[#1B8E44] hover:bg-[#147236] text-white'
-              }`}
-            >
-              {savingSecurity ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : require2fa ? (
-                <ShieldOff className="w-3.5 h-3.5" />
-              ) : (
-                <ShieldCheck className="w-3.5 h-3.5" />
-              )}
-              {require2fa ? 'Stop requiring 2FA' : 'Require 2FA for everyone'}
-            </button>
+            {require2fa === false && (
+              <button
+                type="button"
+                onClick={turnOnRequire2fa}
+                disabled={savingSecurity}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold disabled:opacity-50 bg-[#1B8E44] hover:bg-[#147236] text-white"
+              >
+                {savingSecurity ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                Require 2FA for everyone
+              </button>
+            )}
           </div>
           <NoticeBox notice={securityNotice} />
         </div>
@@ -421,7 +450,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
           <div className="mx-5 mt-4 p-4 rounded-xl border border-slate-300 bg-slate-50 text-xs text-slate-700 space-y-2">
             <div className="flex items-center justify-between">
               <strong className="flex items-center gap-1.5">
-                <ShieldOff className="w-4 h-4 text-slate-500" /> Reset 2FA for {resetFor.email}
+                <Smartphone className="w-4 h-4 text-slate-500" /> Lost phone: reset 2FA for {resetFor.email}
               </strong>
               <button type="button" onClick={() => setResetFor(null)} className="text-slate-400 hover:text-slate-700 font-bold">
                 Close
@@ -484,6 +513,22 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                         {acc.blocked && (
                           <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white">BLOCKED</span>
                         )}
+                        {acc.locked && (
+                          <span
+                            title="Locked after 5 wrong passwords. Send a password reset mail to unlock."
+                            className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200 inline-flex items-center gap-0.5"
+                          >
+                            <Lock className="w-2.5 h-2.5" /> LOCKED
+                          </span>
+                        )}
+                        {acc.twoFactorOff && (
+                          <span
+                            title="A Super Admin stopped two-step sign-in for this user"
+                            className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-200 text-slate-600"
+                          >
+                            2FA OFF
+                          </span>
+                        )}
                       </div>
                       {acc.name && acc.email && <div className="text-slate-500">{acc.email}</div>}
                       <div className="text-[10px] font-mono text-slate-400 mt-0.5">UID: {acc.uid}</div>
@@ -529,6 +574,13 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                       {acc.mustChangePassword && (
                         <div className="text-[10px] text-amber-700 mt-1">Still on temporary password (updates at their next CMS sign-in)</div>
                       )}
+                      {acc.locked ? (
+                        <div className="text-[10px] text-rose-700 mt-1">Locked after 5 wrong passwords. Send a password reset mail to unlock.</div>
+                      ) : acc.failedAttempts ? (
+                        <div className="text-[10px] text-amber-700 mt-1">
+                          {acc.failedAttempts} wrong password{acc.failedAttempts === 1 ? '' : 's'} since last sign-in (locks at 5)
+                        </div>
+                      ) : null}
                       {!acc.hasAccess && (
                         <div className="text-[10px] text-rose-600 mt-1">Missing CMS access (not in admins)</div>
                       )}
@@ -538,12 +590,49 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                         <button
                           onClick={() => handleReset(acc)}
                           disabled={busy || !acc.email}
-                          title={acc.email ? 'Email this user a link to set a new password' : 'No email on record'}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 disabled:opacity-40"
+                          title={
+                            !acc.email
+                              ? 'No email on record'
+                              : acc.locked
+                                ? 'Unlock the account and email them a link to set a new password'
+                                : 'Email this user a link to set a new password'
+                          }
+                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border font-bold disabled:opacity-40 ${
+                            acc.locked
+                              ? 'border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-800'
+                              : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                          }`}
                         >
-                          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
-                          Send reset email
+                          {busy ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : acc.locked ? (
+                            <LockOpen className="w-3.5 h-3.5" />
+                          ) : (
+                            <Mail className="w-3.5 h-3.5" />
+                          )}
+                          {acc.locked ? 'Unlock & send password reset mail' : 'Send password reset mail'}
                         </button>
+                        {isSuperAdmin && (
+                          <button
+                            onClick={() => handleTwoFactorToggle(acc)}
+                            disabled={busy || isMe || !acc.hasAccess}
+                            title={
+                              isMe
+                                ? 'You cannot change your own 2FA. Another Super Admin can.'
+                                : acc.twoFactorOff
+                                  ? 'Ask this user for 2FA again'
+                                  : 'Stop two-step sign-in for this user only'
+                            }
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border font-bold disabled:opacity-40 ${
+                              acc.twoFactorOff
+                                ? 'border-emerald-200 hover:bg-emerald-50 text-emerald-700'
+                                : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                            }`}
+                          >
+                            {acc.twoFactorOff ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldOff className="w-3.5 h-3.5" />}
+                            {acc.twoFactorOff ? 'Turn 2FA back on' : 'Stop 2FA'}
+                          </button>
+                        )}
                         {isSuperAdmin && (
                           <button
                             onClick={() => {
@@ -551,11 +640,11 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                               setResetCopied(false);
                             }}
                             disabled={!acc.email}
-                            title="Remove this user's authenticator app (lost or new phone)"
+                            title="Remove this user's authenticator app (lost or new phone) so they can set it up again"
                             className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 disabled:opacity-40"
                           >
-                            <ShieldOff className="w-3.5 h-3.5" />
-                            Reset 2FA
+                            <Smartphone className="w-3.5 h-3.5" />
+                            Lost phone
                           </button>
                         )}
                         <button
@@ -602,7 +691,8 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
             </span>
           ))}
           <span className="block mt-1">
-            "Send reset email" comes from Firebase (<em>noreply@…firebaseapp.com</em>) and may land in spam.
+            "Send password reset mail" comes from Firebase (<em>noreply@…firebaseapp.com</em>) and may land in spam. Accounts lock after 5
+            wrong passwords; sending a password reset mail unlocks them.
           </span>
         </div>
       </div>
