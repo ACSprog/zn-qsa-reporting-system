@@ -19,7 +19,12 @@ function friendly(e: any): string {
   if (code === 'auth/invalid-verification-code') return 'That code is not right. Enter the current 6-digit code shown in your app.';
   if (code === 'auth/unverified-email') return 'Please verify your email address first.';
   if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation')
-    return 'Authenticator-app 2FA is not switched on for this Firebase project yet. Ask your Super Admin to run: npm run setup:firebase -- --enable-2fa';
+  {
+    const { firebaseConfig, auth } = getFirebaseHandles();
+    const project = firebaseConfig?.projectId || '<project-id>';
+    const email = auth?.currentUser?.email || '<super-admin-email>';
+    return `Authenticator-app 2FA is not switched on for this Firebase project yet. A Super Admin runs this once, in the project folder: npm run setup:firebase -- --project ${project} --email ${email} --enable-2fa`;
+  }
   if (code === 'auth/too-many-requests') return 'Too many attempts. Wait a few minutes and try again.';
   return e?.message || 'Something went wrong.';
 }
