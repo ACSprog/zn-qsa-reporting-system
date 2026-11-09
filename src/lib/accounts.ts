@@ -414,8 +414,23 @@ export async function setAccountTwoFactorOff(account: CmsAccount, off: boolean):
     return;
   }
   try {
-    await updateDoc(doc(db, 'admins', account.uid), { twoFactorOff: off });
-  } catch (e) {
+    if (account.role === 'superadmin') {
+      // Only this field may change on another Super Admin's record
+      await updateDoc(doc(db, 'admins', account.uid), { twoFactorOff: off });
+    } else {
+      // Older records may lack enabled/email/role, which the rules require on every save
+      await setDoc(
+        doc(db, 'admins', account.uid),
+        { twoFactorOff: off, enabled: !account.blocked, email: account.email || '', role: account.role },
+        { merge: true }
+      );
+    }
+  } catch (e: any) {
+    if (e?.code === 'permission-denied') {
+      throw new Error(
+        'Permission denied. Only Super Admins can stop 2FA, and not on their own account. If you are a Super Admin, the latest security rules are probably not published yet: run  firebase deploy --only firestore:rules --project <project-id>'
+      );
+    }
     throw new Error(friendlyError(e));
   }
 }
