@@ -24,6 +24,7 @@ import {
   Auth,
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
+  sendSignInLinkToEmail,
   signOut as fbSignOut,
   onAuthStateChanged,
   setPersistence,
@@ -867,28 +868,45 @@ export async function signInWithEmail(
  * in Firebase Auth's authorized domains (so the email is still sent).
  */
 export async function withCmsContinueLink<T>(send: (settings?: ActionCodeSettings) => Promise<T>): Promise<T> {
-  if (typeof window === 'undefined') return send(undefined);
-  const origin = window.location.origin;
-  // 1st choice: handleCodeInApp makes Firebase's default link page forward the code straight
-  // to our styled /auth/action page (works even when the console "action URL" setting is locked).
-  // Fallbacks: plain continue link to the CMS, then Firebase defaults.
-  const attempts: Array<ActionCodeSettings | undefined> = [
-    { url: `${origin}/auth/action`, handleCodeInApp: true },
-    { url: `${origin}/admin` },
-    undefined
-  ];
-  let lastError: any;
-  for (const settings of attempts) {
+  const settings: ActionCodeSettings | undefined =
+    typeof window !== 'undefined' ? { url: `${window.location.origin}/admin` } : undefined;
+  try {
+    return await send(settings);
+  } catch (e: any) {
+    if (settings && /continue-uri|unauthorized-domain/.test(e?.code || '')) return send(undefined);
+    throw e;
+  }
+}
+
+/**
+ * "Set a new password" e-mail that opens OUR branded /auth/action page.
+ *
+ * Firebase's password-reset links always open Firebase's plain page unless the console
+ * "Customize action URL" setting is saved, and that setting is locked on this project.
+ * Sign-in links (mode=signIn) are different: Firebase forwards them to our page. So we send
+ * a one-time sign-in link; our page signs the user in (asking for the 2FA code if they have it)
+ * and lets them choose a new password.
+ *
+ * Needs "Email link (passwordless sign-in)" switched on under Authentication > Sign-in method >
+ * Email/Password. If it is off, or the daily quota for these e-mails is used up (5/day on the
+ * free Spark plan), it falls back to Firebase's classic reset e-mail so the user still gets a link.
+ */
+export async function sendPasswordLinkEmail(email: string): Promise<'branded' | 'classic'> {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!auth) return 'branded'; // preview mode
+  if (typeof window !== 'undefined') {
     try {
-      return await send(settings);
+      const url = `${window.location.origin}/auth/action?flow=password&e=${encodeURIComponent(cleanEmail)}`;
+      await sendSignInLinkToEmail(auth, cleanEmail, { url, handleCodeInApp: true });
+      return 'branded';
     } catch (e: any) {
-      lastError = e;
       const code: string = e?.code || '';
-      // Only retry for problems with the link settings; real errors (user not found, rate limit) go straight back
-      if (!settings || !/continue-uri|unauthorized-domain|argument-error|invalid-dynamic-link|operation-not-allowed|invalid-hosting-link/.test(code)) throw e;
+      if (!/operation-not-allowed|quota-exceeded|too-many-requests|continue-uri|unauthorized-domain|argument-error|admin-restricted/.test(code)) throw e;
+      console.warn('[auth] Branded password link not available, using the classic reset e-mail:', code);
     }
   }
-  throw lastError;
+  await withCmsContinueLink((settings) => sendPasswordResetEmail(auth!, cleanEmail, settings));
+  return 'classic';
 }
 
 /** When the current CMS session started (last real sign-in), in ms since epoch. */
@@ -936,7 +954,7 @@ export async function sendResetPasswordEmail(
 
   if (auth) {
     try {
-      await withCmsContinueLink((settings) => sendPasswordResetEmail(auth!, cleanEmail, settings));
+      await sendPasswordLinkEmail(cleanEmail);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to dispatch password reset email.' };
