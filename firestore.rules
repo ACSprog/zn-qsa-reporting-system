@@ -19,8 +19,8 @@ service cloud.firestore {
 
     // Per person, set by a Super Admin: admins/{uid}.twoFactor 'on' (required for them even if
     // not for everyone) or 'off' (not required for them); absent = follow the everyone setting.
-    function twoFactorOk() {
-      let mine = get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('twoFactor', '');
+    function twoFactorOk(me) {
+      let mine = me.get('twoFactor', '');
       return has2fa() || mine == 'off' || (mine != 'on' && !globalRequire2fa());
     }
 
@@ -39,13 +39,19 @@ service cloud.firestore {
     }
 
     // An unblocked CMS user (blocked users have enabled == false) who passed 2FA if required
+    // NOTE: Firestore allows only 10 document lookups (get/exists) per request, counted across
+    // ALL the allow rules it tries. So every rule below checks the cheap things (which document,
+    // which fields change) BEFORE calling isAdmin()/isManager()/isSuperAdmin(), and rules that
+    // don't apply stop without any lookups.
     function isAdmin() {
       return isSignedIn()
+        && sessionFresh()
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('enabled', true) != false
-        && twoFactorOk()
-        && notLockedOut()
-        && sessionFresh();
+        && adminRecordOk(get(/databases/$(database)/documents/admins/$(request.auth.uid)).data);
+    }
+
+    function adminRecordOk(me) {
+      return me.get('enabled', true) != false && twoFactorOk(me) && notLockedOut();
     }
 
     // Legacy marker: anyone in qsaAdmins is treated as a Manager
@@ -123,7 +129,7 @@ service cloud.firestore {
     // A Super Admin asking (or re-asking) another Super Admin to confirm an action
     function isPendingActionRequest(uid) {
       let pa = request.resource.data.pendingAction;
-      return isSuperAdmin() && request.auth.uid != uid
+      return request.auth.uid != uid
         && isSuperAdminDoc(resource.data)
         && adminChanges().hasOnly(['pendingAction'])
         && (!('pendingAction' in resource.data) || resource.data.pendingAction.requestedBy == request.auth.uid)
@@ -132,15 +138,17 @@ service cloud.firestore {
         && (pa.type != 'role' || pa.get('newRole', '') in ['viewer', 'officer', 'manager'])
         && pa.requestedBy == request.auth.uid
         && pa.requestedByEmail is string && pa.requestedByEmail.size() <= 320
-        && pa.requestedAt == request.time;
+        && pa.requestedAt == request.time
+        && isSuperAdmin();
     }
 
     // The requester withdrawing their own request
     function isPendingActionCancel(uid) {
-      return isSuperAdmin() && request.auth.uid != uid
+      return request.auth.uid != uid
         && adminChanges().hasOnly(['pendingAction'])
         && !('pendingAction' in request.resource.data)
-        && resource.data.pendingAction.requestedBy == request.auth.uid;
+        && resource.data.pendingAction.requestedBy == request.auth.uid
+        && isSuperAdmin();
     }
 
     // The request still comes from an active Super Admin
@@ -173,34 +181,42 @@ service cloud.firestore {
     // confirmation (see above). Nobody can change or remove their own access directly.
     match /admins/{uid} {
       allow read: if isSignedIn() && (request.auth.uid == uid || isManager());
-      allow create: if isManager() && request.auth.uid != uid && validRoleDoc()
+      allow create: if request.auth.uid != uid && validRoleDoc()
         && !('pendingAction' in request.resource.data)
         && !('twoFactor' in request.resource.data)
+        && isManager()
         && (isSuperAdmin() || juniorRole(request.resource.data.get('role', 'officer')));
-      allow update: if isManager() && request.auth.uid != uid && validRoleDoc()
+      // Viewers, Officers and Managers (never Super Admin records: see the rules after this one)
+      allow update: if request.auth.uid != uid
+        && !isSuperAdminDoc(resource.data)
+        && validRoleDoc()
         && !adminChanges().hasAny(['pendingAction'])
+        && isManager()
         // switching 2FA on/off for one person is for Super Admins only
         && (!adminChanges().hasAny(['twoFactor']) || isSuperAdmin())
-        && ((isSuperAdmin() && !isSuperAdminDoc(resource.data))
+        && (isSuperAdmin()
           || (juniorRole(request.resource.data.get('role', 'officer'))
             && juniorRole(resource.data.get('role', 'officer'))
             && !isLegacyManager(uid)));
       // Unblocking a Super Admin needs no confirmation (they can't sign in to give it)
-      allow update: if isSuperAdmin() && request.auth.uid != uid && isSuperAdminDoc(resource.data)
-        && adminChanges().hasOnly(['enabled']) && request.resource.data.enabled == true;
-      allow update: if isPendingActionRequest(uid) || isPendingActionCancel(uid) || isOwnPendingActionAnswer(uid);
+      allow update: if request.auth.uid != uid && isSuperAdminDoc(resource.data)
+        && adminChanges().hasOnly(['enabled']) && request.resource.data.enabled == true
+        && isSuperAdmin();
       // Super Admin switching 2FA on/off for another Super Admin (nobody can for themselves)
-      allow update: if isSuperAdmin() && request.auth.uid != uid && isSuperAdminDoc(resource.data)
+      allow update: if request.auth.uid != uid && isSuperAdminDoc(resource.data)
         && adminChanges().hasOnly(['twoFactor'])
-        && request.resource.data.get('twoFactor', 'on') in ['on', 'off'];
+        && request.resource.data.get('twoFactor', 'on') in ['on', 'off']
+        && isSuperAdmin();
+      allow update: if isPendingActionRequest(uid) || isPendingActionCancel(uid) || isOwnPendingActionAnswer(uid);
       // A user may only clear their own "must change password" flag (and the temporary
       // password fingerprint) once they use a password of their own
       allow update: if isSignedIn() && request.auth.uid == uid
         && adminChanges().hasOnly(['mustChangePassword', 'tempPasswordHash'])
         && request.resource.data.mustChangePassword == false
         && !('tempPasswordHash' in request.resource.data);
-      allow delete: if isManager() && request.auth.uid != uid
+      allow delete: if request.auth.uid != uid
         && !isSuperAdminDoc(resource.data)
+        && isManager()
         && (isSuperAdmin() || (juniorRole(resource.data.get('role', 'officer')) && !isLegacyManager(uid)));
       // A Super Admin approving another Super Admin's request to remove them
       allow delete: if isSignedIn() && request.auth.uid == uid
@@ -316,13 +332,13 @@ service cloud.firestore {
       // Viewers: no updates. Officers: status/notes, or a deletion request.
       // Managers: status/notes, archive/restore (deleted) and deciding deletion requests.
       allow update: if isReportForm(form) && validStatus() && (
-        (isManager()
-          && reportChanges().hasOnly(['status', 'notes', 'deleted', 'deletionRequest', 'reclassifiedTo', 'reclassification'])
+        (reportChanges().hasOnly(['status', 'notes']) && isOfficer())
+        || (isNewDeletionRequest() && isOfficer())
+        || (reportChanges().hasOnly(['status', 'notes', 'deleted', 'deletionRequest', 'reclassifiedTo', 'reclassification'])
           && request.resource.data.deleted is bool
           // Moving a case to another report type keeps its number; only current types allowed
-          && request.resource.data.get('reclassifiedTo', 'hazard') in ['hazard', 'occurrence', 'concern'])
-        || (isOfficer() && reportChanges().hasOnly(['status', 'notes']))
-        || (isOfficer() && isNewDeletionRequest())
+          && request.resource.data.get('reclassifiedTo', 'hazard') in ['hazard', 'occurrence', 'concern']
+          && isManager())
       );
 
       allow delete: if false;
