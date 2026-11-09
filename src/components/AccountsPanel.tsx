@@ -236,7 +236,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
     if (
       !window.confirm(
         off
-          ? `Stop 2FA for ${who}?\n\nThey will sign in with just their password. If they already use an authenticator app, it is asked for one last time at their next sign-in and then removed.\n\nIf their phone is lost they can't give that last code: use "Lost phone" instead.`
+          ? `Stop 2FA for ${who}?\n\nThey will sign in with just their password. If they already use an authenticator app, it is asked for one last time at their next sign-in and then removed.\n\nIf their phone is lost they can't give that last code: use "Reset 2FA" instead.`
           : `Turn 2FA back on for ${who}?\n\nWhile 2FA is required for everyone, they will be asked to set up their authenticator app at their next sign-in.`
       )
     )
@@ -450,7 +450,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
           <div className="mx-5 mt-4 p-4 rounded-xl border border-slate-300 bg-slate-50 text-xs text-slate-700 space-y-2">
             <div className="flex items-center justify-between">
               <strong className="flex items-center gap-1.5">
-                <Smartphone className="w-4 h-4 text-slate-500" /> Lost phone: reset 2FA for {resetFor.email}
+                <ShieldOff className="w-4 h-4 text-slate-500" /> Reset 2FA for {resetFor.email}
               </strong>
               <button type="button" onClick={() => setResetFor(null)} className="text-slate-400 hover:text-slate-700 font-bold">
                 Close
@@ -644,7 +644,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                             className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 disabled:opacity-40"
                           >
                             <Smartphone className="w-3.5 h-3.5" />
-                            Lost phone
+                            Reset 2FA
                           </button>
                         )}
                         <button
