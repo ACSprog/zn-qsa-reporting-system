@@ -6,7 +6,8 @@ import { AuthShell, NewPasswordFields, checkPassword, setLoginNotice } from '../
 
 /**
  * Branded handler for the links in Firebase e-mails (password reset, email verification).
- * Firebase console > Authentication > Templates > Customize action URL: https://<site>/auth/action
+ * Reached either via the console "Customize action URL" setting, or because the emails are sent
+ * with handleCodeInApp (Firebase's default page then forwards mode + oobCode here).
  */
 interface Props {
   onGoToCms: () => void;
@@ -53,6 +54,12 @@ export const AuthActionPage: React.FC<Props> = ({ onGoToCms, onGoHome }) => {
       return;
     }
     if (!oobCode) {
+      // Arriving here with no code at all means Firebase's own page already finished the job
+      // and its "Continue" button sent the user on: just take them to sign in.
+      if (!mode) {
+        onGoToCms();
+        return;
+      }
       setState({ kind: 'error', message: 'This link is incomplete. Open it again from the email, or copy the whole link into your browser.' });
       return;
     }

@@ -867,14 +867,28 @@ export async function signInWithEmail(
  * in Firebase Auth's authorized domains (so the email is still sent).
  */
 export async function withCmsContinueLink<T>(send: (settings?: ActionCodeSettings) => Promise<T>): Promise<T> {
-  const settings: ActionCodeSettings | undefined =
-    typeof window !== 'undefined' ? { url: `${window.location.origin}/admin` } : undefined;
-  try {
-    return await send(settings);
-  } catch (e: any) {
-    if (settings && /continue-uri|unauthorized-domain/.test(e?.code || '')) return send(undefined);
-    throw e;
+  if (typeof window === 'undefined') return send(undefined);
+  const origin = window.location.origin;
+  // 1st choice: handleCodeInApp makes Firebase's default link page forward the code straight
+  // to our styled /auth/action page (works even when the console "action URL" setting is locked).
+  // Fallbacks: plain continue link to the CMS, then Firebase defaults.
+  const attempts: Array<ActionCodeSettings | undefined> = [
+    { url: `${origin}/auth/action`, handleCodeInApp: true },
+    { url: `${origin}/admin` },
+    undefined
+  ];
+  let lastError: any;
+  for (const settings of attempts) {
+    try {
+      return await send(settings);
+    } catch (e: any) {
+      lastError = e;
+      const code: string = e?.code || '';
+      // Only retry for problems with the link settings; real errors (user not found, rate limit) go straight back
+      if (!settings || !/continue-uri|unauthorized-domain|argument-error|invalid-dynamic-link|operation-not-allowed|invalid-hosting-link/.test(code)) throw e;
+    }
   }
+  throw lastError;
 }
 
 /** When the current CMS session started (last real sign-in), in ms since epoch. */
