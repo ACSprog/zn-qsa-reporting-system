@@ -16,20 +16,18 @@ export const HAZARD_GROUPS = [
   'Other / Uncategorized'
 ];
 
-export const HAZARD_CATEGORIES = [
-  'Airfield & Runway Condition',
-  'Wildlife / Bird Strike Hazard',
-  'Foreign Object Debris (FOD)',
-  'Aircraft Equipment / System Malfunction',
-  'Ground Support Equipment (GSE) Defect',
-  'Weather / Meteorological Phenomena',
-  'Human Factors / Fatigue / Communication',
-  'Refueling & Hazardous Materials',
-  'Baggage & Cargo Security',
-  'Crew Training & Procedures',
-  'PPE & Workplace Physical Hazards',
+/** Plain-language categories, shared by the Hazard and Safety Concern forms */
+const PLAIN_SAFETY_CATEGORIES = [
+  'Equipment / Machinery',
+  'Human Factors',
+  'Environmental',
+  'Procedural / Operational',
+  'Maintenance Related',
+  'Security Related',
   'Other'
 ];
+
+export const HAZARD_CATEGORIES = PLAIN_SAFETY_CATEGORIES;
 
 export const INCIDENT_TYPES = [
   'Airspace Infringement / Deviation',
@@ -55,20 +53,7 @@ export const INCIDENT_TYPES = [
   'Other Operational Occurrence'
 ];
 
-export const CONCERN_CATEGORIES = [
-  'Operating Procedures & SOP Clarity',
-  'Fatigue Risk & Rostering',
-  'Staffing Levels & Workload',
-  'Ground Handling Quality & Turnaround Pressure',
-  'Maintenance Support & Spares Availability',
-  'Communications & Reporting Culture',
-  'Training Adequacy & Competency',
-  'Physical Security & Access Control',
-  'Aircraft Interior Cleanliness & Cabin Equipment',
-  'Airfield Services & Third-Party Contractors',
-  'Environmental & Health Safety',
-  'Other Safety Concern'
-];
+export const CONCERN_CATEGORIES = PLAIN_SAFETY_CATEGORIES;
 
 export const YES_NO_OPTIONS = ['Yes', 'No'];
 

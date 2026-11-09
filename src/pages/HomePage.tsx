@@ -47,7 +47,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
           </p>
 
           {/* Core Guarantees Banner */}
-          <div className="pt-6 grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-3xl mx-auto text-left text-xs">
+          <div className="pt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-3xl mx-auto text-left text-xs">
             <div className="bg-[#0e3c20]/90 border border-[#1b8e44]/60 rounded-xl p-3 flex items-start gap-2.5 shadow-sm">
               <EyeOff className="w-5 h-5 text-[#F37C1C] shrink-0 mt-0.5" />
               <div>
@@ -64,11 +64,15 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
               </div>
             </div>
 
-            <div className="bg-[#0e3c20]/90 border border-[#1b8e44]/60 rounded-xl p-3 flex items-start gap-2.5 shadow-sm">
+            <div className="sm:col-span-2 bg-[#0e3c20]/90 border border-[#1b8e44]/60 rounded-xl p-3.5 flex items-start gap-2.5 shadow-sm">
               <HeartHandshake className="w-5 h-5 text-emerald-300 shrink-0 mt-0.5" />
               <div>
                 <strong className="text-white font-bold block">Just Culture Commitment</strong>
-                <span className="text-emerald-100/70">Non-punitive safety policy to foster transparent reporting.</span>
+                <span className="text-emerald-100/80 leading-relaxed">
+                  We encourage open and honest reporting. All reports will be treated fairly and confidentially. Employees will not
+                  be penalised for reporting genuine safety concerns or honest mistakes. We believe in learning, accountability and
+                  continuous improvement.
+                </span>
               </div>
             </div>
           </div>
@@ -117,6 +121,11 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
               <p className="text-sm text-slate-600 mt-1 leading-relaxed">
                 {FORMS_META.hazard.useWhen}
               </p>
+              {FORMS_META.hazard.example && (
+                <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                  <strong className="font-bold text-slate-600">Example:</strong> {FORMS_META.hazard.example}
+                </p>
+              )}
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-sm font-bold text-[#F37C1C] group-hover:translate-x-1 transition-transform">
@@ -152,6 +161,11 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
               <p className="text-sm text-slate-600 mt-1 leading-relaxed">
                 {FORMS_META.occurrence.useWhen}
               </p>
+              {FORMS_META.occurrence.example && (
+                <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                  <strong className="font-bold text-slate-600">Example:</strong> {FORMS_META.occurrence.example}
+                </p>
+              )}
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-sm font-bold text-[#DE2010] group-hover:translate-x-1 transition-transform">
@@ -187,6 +201,11 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
               <p className="text-sm text-slate-600 mt-1 leading-relaxed">
                 {FORMS_META.concern.useWhen}
               </p>
+              {FORMS_META.concern.example && (
+                <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                  <strong className="font-bold text-slate-600">Example:</strong> {FORMS_META.concern.example}
+                </p>
+              )}
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-sm font-bold text-[#1B8E44] group-hover:translate-x-1 transition-transform">
