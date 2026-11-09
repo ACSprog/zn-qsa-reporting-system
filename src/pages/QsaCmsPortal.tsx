@@ -256,9 +256,13 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
     }
   };
 
-  // Live subscription: new submissions appear without pressing Refresh
+  // Live subscription: new submissions appear without pressing Refresh.
+  // Only once the session may read reports (2FA done if required); restarts with a clean slate
+  // whenever that changes, so an old "permission denied" never lingers after signing in again.
+  const canReadReports = isAdmin && !(require2fa && !session2fa);
   useEffect(() => {
-    if (!isAdmin) return;
+    setReportsError(null);
+    if (!canReadReports) return;
     setLoadingReports(true);
     const unsubscribe = subscribeToAllReports(
       (data) => {
@@ -271,7 +275,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
       }
     );
     return () => unsubscribe();
-  }, [isAdmin]);
+  }, [canReadReports]);
 
   // Keep the open detail drawer in sync with live data
   useEffect(() => {
@@ -359,6 +363,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
 
   const handleSignOut = async () => {
     clearCmsActivity();
+    setReportsError(null);
     await signOutUser();
     setCurrentUser(null);
     setIsAdmin(false);
