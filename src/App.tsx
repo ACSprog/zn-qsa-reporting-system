@@ -14,13 +14,14 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { FormType } from './types';
+import { FormType, formGroup } from './types';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { HomePage } from './pages/HomePage';
 import { FormPage } from './pages/FormPage';
 import { QsaCmsPortal } from './pages/QsaCmsPortal';
 import { AuthActionPage } from './pages/AuthActionPage';
+import { AnnouncementBanner } from './components/AnnouncementBanner';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<'home' | 'form' | 'cms' | 'auth'>('home');
@@ -61,10 +62,14 @@ export default function App() {
     const formRoutes: Record<string, FormType> = {
       '/hazard': 'hazard',
       '/report/hazard': 'hazard',
-      '/incident': 'incident',
-      '/report/incident': 'incident',
-      '/accident': 'accident',
-      '/report/accident': 'accident',
+      // Old Incident / Accident links open the combined form
+      '/incident': 'occurrence',
+      '/report/incident': 'occurrence',
+      '/accident': 'occurrence',
+      '/report/accident': 'occurrence',
+      '/occurrence': 'occurrence',
+      '/report/occurrence': 'occurrence',
+      '/incident-accident': 'occurrence',
       '/concern': 'concern',
       '/report/concern': 'concern'
     };
@@ -76,15 +81,15 @@ export default function App() {
     }
 
     // Check query params (?form=hazard)
-    if (formParam && ['hazard', 'incident', 'accident', 'concern'].includes(formParam)) {
-      setSelectedForm(formParam as FormType);
+    if (formParam && ['hazard', 'occurrence', 'incident', 'accident', 'concern'].includes(formParam)) {
+      setSelectedForm(formGroup(formParam as FormType));
       setCurrentView('form');
       return;
     }
 
     // Check hash (#hazard)
-    if (hash && ['hazard', 'incident', 'accident', 'concern'].includes(hash)) {
-      setSelectedForm(hash as FormType);
+    if (hash && ['hazard', 'occurrence', 'incident', 'accident', 'concern'].includes(hash)) {
+      setSelectedForm(formGroup(hash as FormType));
       setCurrentView('form');
       return;
     }
@@ -140,16 +145,19 @@ export default function App() {
   // If in CMS view, render the dedicated QSA CMS Console
   if (currentView === 'cms') {
     return (
-      <QsaCmsPortal
-        onNavigatePublicSite={navigateToHome}
-        onNavigatePublicForm={navigateToForm}
-      />
+      <>
+        <AnnouncementBanner />
+        <QsaCmsPortal onNavigatePublicSite={navigateToHome} onNavigatePublicForm={navigateToForm} />
+      </>
     );
   }
 
   // Otherwise, render the Public Safety Reporting Site
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-900 selection:bg-[#1B8E44] selection:text-white">
+      {/* Super Admin announcement (e.g. scheduled maintenance) */}
+      <AnnouncementBanner />
+
       {/* Clean Public Header */}
       <Header
         currentView={currentView}

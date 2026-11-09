@@ -89,7 +89,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* 1. Hazard Card (Copper-Orange Theme) */}
           <div
             onClick={() => onSelectForm('hazard')}
@@ -125,44 +125,9 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
             </div>
           </div>
 
-          {/* 2. Incident Card (Aviation Blue Theme) */}
+          {/* 2. Incident / Accident Card (Flag Red Theme): one combined form */}
           <div
-            onClick={() => onSelectForm('incident')}
-            className="group bg-white rounded-2xl border-2 border-slate-200 hover:border-[#0284c7] shadow-sm hover:shadow-xl transition-all duration-200 p-6 sm:p-7 flex flex-col justify-between cursor-pointer relative overflow-hidden"
-          >
-            <div className="absolute top-0 right-0 w-28 h-28 bg-sky-500/10 rounded-bl-full pointer-events-none transition-transform group-hover:scale-110" />
-
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 rounded-xl bg-sky-50 border border-sky-200 flex items-center justify-center text-[#0284c7] group-hover:bg-[#0284c7] group-hover:text-white transition-colors shadow-xs">
-                  <AlertCircle className="w-6 h-6" />
-                </div>
-                <span className="font-mono text-xs font-bold text-sky-900 bg-sky-100 px-2.5 py-1 rounded-md border border-sky-300">
-                  INC
-                </span>
-              </div>
-
-              <h3 className="text-xl font-extrabold text-slate-900 group-hover:text-[#0284c7] transition-colors">
-                Incident Report
-              </h3>
-
-              <div className="mt-2 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                When to use:
-              </div>
-              <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                {FORMS_META.incident.useWhen}
-              </p>
-            </div>
-
-            <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-sm font-bold text-[#0284c7] group-hover:translate-x-1 transition-transform">
-              <span>Open Incident Form</span>
-              <ArrowRight className="w-4 h-4" />
-            </div>
-          </div>
-
-          {/* 3. Accident Card (Flag Red Theme) */}
-          <div
-            onClick={() => onSelectForm('accident')}
+            onClick={() => onSelectForm('occurrence')}
             className="group bg-white rounded-2xl border-2 border-slate-200 hover:border-[#DE2010] shadow-sm hover:shadow-xl transition-all duration-200 p-6 sm:p-7 flex flex-col justify-between cursor-pointer relative overflow-hidden"
           >
             <div className="absolute top-0 right-0 w-28 h-28 bg-rose-500/10 rounded-bl-full pointer-events-none transition-transform group-hover:scale-110" />
@@ -173,29 +138,29 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
                   <Shield className="w-6 h-6" />
                 </div>
                 <span className="font-mono text-xs font-bold text-rose-900 bg-rose-100 px-2.5 py-1 rounded-md border border-rose-300">
-                  ACC
+                  IA
                 </span>
               </div>
 
               <h3 className="text-xl font-extrabold text-slate-900 group-hover:text-[#DE2010] transition-colors">
-                Accident Report
+                Incident / Accident Report
               </h3>
 
               <div className="mt-2 text-xs font-bold text-slate-500 uppercase tracking-wider">
                 When to use:
               </div>
               <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                {FORMS_META.accident.useWhen}
+                {FORMS_META.occurrence.useWhen}
               </p>
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-sm font-bold text-[#DE2010] group-hover:translate-x-1 transition-transform">
-              <span>Open Accident Form</span>
+              <span>Open Incident / Accident Form</span>
               <ArrowRight className="w-4 h-4" />
             </div>
           </div>
 
-          {/* 4. Safety Concern Card (Airline Green Theme) */}
+          {/* 3. Safety Concern Card (Airline Green Theme) */}
           <div
             onClick={() => onSelectForm('concern')}
             className="group bg-white rounded-2xl border-2 border-slate-200 hover:border-[#1B8E44] shadow-sm hover:shadow-xl transition-all duration-200 p-6 sm:p-7 flex flex-col justify-between cursor-pointer relative overflow-hidden"

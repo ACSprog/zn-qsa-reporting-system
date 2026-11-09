@@ -32,6 +32,8 @@ export const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   disabled
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Separate input that asks the phone to open the camera directly
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessages, setErrorMessages] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -62,6 +64,9 @@ export const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       setIsProcessing(false);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
+      }
+      if (cameraInputRef.current) {
+        cameraInputRef.current.value = '';
       }
     }
   };
@@ -149,6 +154,15 @@ export const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
           className="hidden"
           onChange={(e) => handleFiles(e.target.files)}
         />
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          disabled={disabled || files.length >= MAX_FILES_PER_REPORT || isProcessing}
+          className="hidden"
+          onChange={(e) => handleFiles(e.target.files)}
+        />
 
         {isProcessing ? (
           <div className="flex flex-col items-center justify-center py-4 text-slate-600">
@@ -169,9 +183,31 @@ export const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
               </div>
             </div>
 
-            <p className="text-sm font-medium text-slate-700">
-              <span className="text-emerald-700 font-bold hover:underline">Choose photos or files</span>, drag and drop, or capture on mobile
-            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2 my-1">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!disabled && files.length < MAX_FILES_PER_REPORT && !isProcessing) cameraInputRef.current?.click();
+                }}
+                disabled={disabled || files.length >= MAX_FILES_PER_REPORT || isProcessing}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#1B8E44] hover:bg-[#147236] text-white text-xs font-bold disabled:opacity-50"
+              >
+                <Camera className="w-4 h-4" /> Take photo
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!disabled && files.length < MAX_FILES_PER_REPORT && !isProcessing) fileInputRef.current?.click();
+                }}
+                disabled={disabled || files.length >= MAX_FILES_PER_REPORT || isProcessing}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold disabled:opacity-50"
+              >
+                <UploadCloud className="w-4 h-4" /> Choose photos or files
+              </button>
+            </div>
+            <p className="text-sm font-medium text-slate-700">or drag and drop here</p>
             <p className="text-xs text-slate-500 mt-1">
               {isAnonymous
                 ? 'Photos only (JPEG, PNG, WebP) • Up to 600 KB per photo'

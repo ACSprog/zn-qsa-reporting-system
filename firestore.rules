@@ -69,8 +69,15 @@ service cloud.firestore {
       return isAdmin() && (isManager() || myRole() == 'officer');
     }
 
+    // All report collections the CMS reads ('incident' and 'accident' are the old separate
+    // forms, kept for existing records; new cases use the combined 'occurrence' form)
     function isReportForm(form) {
-      return form in ['hazard', 'incident', 'accident', 'concern'];
+      return form in ['hazard', 'occurrence', 'incident', 'accident', 'concern'];
+    }
+
+    // Forms reporters can submit new cases to
+    function isActiveReportForm(form) {
+      return form in ['hazard', 'occurrence', 'concern'];
     }
 
     // Role documents written by Managers. Only these fields are allowed.
@@ -115,11 +122,23 @@ service cloud.firestore {
     }
 
     // Security settings: readable by signed-in users so the CMS knows whether 2FA is required.
+    // settings/announcement: the banner shown to everyone (public forms too), so anyone can
+    // read it; only Super Admins can write it.
+    function validAnnouncement() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['active', 'message', 'level', 'showUntil', 'updatedBy', 'updatedAt'])
+        && d.active is bool
+        && d.message is string && d.message.size() <= 500
+        && d.level in ['info', 'warning', 'critical']
+        && (!('showUntil' in d) || d.showUntil == null || d.showUntil is timestamp);
+    }
+
     // Super Admins can switch the 2FA requirement on or off from the CMS. Turning it ON is only
     // allowed from a session that itself used 2FA, which proves authenticator codes work for this
     // project (otherwise everyone could be locked out). The setup script can always change it.
     match /settings/{doc} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() || doc == 'announcement';
+      allow create, update: if doc == 'announcement' && isSuperAdmin() && validAnnouncement();
       allow create, update: if doc == 'security'
         && isSuperAdmin()
         && request.resource.data.keys().hasOnly(['require2fa', 'updatedBy', 'updatedAt'])
@@ -149,9 +168,9 @@ service cloud.firestore {
         && dr.reason is string && dr.reason.size() > 0 && dr.reason.size() <= 1000;
     }
 
-    // Report collections (hazard, incident, accident, concern ONLY)
+    // Report collections (hazard, occurrence, concern; plus old incident / accident records)
     match /{form}/{reportId} {
-      allow create: if isReportForm(form)
+      allow create: if isActiveReportForm(form)
         && request.resource.data.reporting in ['Named', 'Confidential', 'Anonymous']
         && request.resource.data.status == 'New'
         && request.resource.data.deleted == false
@@ -172,8 +191,10 @@ service cloud.firestore {
       // Managers: status/notes, archive/restore (deleted) and deciding deletion requests.
       allow update: if isReportForm(form) && validStatus() && (
         (isManager()
-          && reportChanges().hasOnly(['status', 'notes', 'deleted', 'deletionRequest'])
-          && request.resource.data.deleted is bool)
+          && reportChanges().hasOnly(['status', 'notes', 'deleted', 'deletionRequest', 'reclassifiedTo', 'reclassification'])
+          && request.resource.data.deleted is bool
+          // Moving a case to another report type keeps its number; only current types allowed
+          && request.resource.data.get('reclassifiedTo', 'hazard') in ['hazard', 'occurrence', 'concern'])
         || (isOfficer() && reportChanges().hasOnly(['status', 'notes']))
         || (isOfficer() && isNewDeletionRequest())
       );
@@ -182,7 +203,7 @@ service cloud.firestore {
 
       // Evidence subcollection (1 to 5 files per report)
       match /evidence/{n} {
-        allow create: if isReportForm(form)
+        allow create: if isActiveReportForm(form)
           && n in ['1', '2', '3', '4', '5']
           && request.resource.data.keys().hasOnly(['name', 'contentType', 'size', 'data', 'order', 'createdAt'])
           && request.resource.data.contentType in ['image/jpeg', 'application/pdf']

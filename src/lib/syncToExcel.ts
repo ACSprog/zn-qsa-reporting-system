@@ -124,7 +124,7 @@ export async function executeExcelSync(
     throw new Error(`Microsoft Authentication failed: ${authErr?.message || authErr}`);
   }
 
-  const forms: FormType[] = ['hazard', 'incident', 'accident', 'concern'];
+  const forms: FormType[] = ['hazard', 'occurrence', 'incident', 'accident', 'concern'];
   const formResults: SyncResultPerForm[] = [];
   const allMissingReports: { form: FormType; report: BaseReportData }[] = [];
 

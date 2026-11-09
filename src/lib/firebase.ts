@@ -42,7 +42,9 @@ import {
   ReportStatus,
   CmsRole,
   DeletionRequest,
-  isManagerRole
+  ReclassificationRecord,
+  isManagerRole,
+  ALL_REPORT_FORMS
 } from '../types';
 import { stripIdentityIfAnonymous, getCategoryForForm } from './idGenerator';
 
@@ -244,7 +246,9 @@ export async function submitSafetyReport(
   const cleanData = stripIdentityIfAnonymous(rawFormData, reporting);
   const evidenceCount = evidenceFiles.length;
   const evidenceBaseFolder = (import.meta.env.VITE_EVIDENCE_FOLDER_URL || '').replace(/\/+$/, '');
-  const evidenceFolder = evidenceCount > 0 && evidenceBaseFolder ? `${evidenceBaseFolder}/${reportId}` : '';
+  // Ignore an unset or placeholder ("{tenant}") SharePoint address so no broken link is stored
+  const evidenceFolder =
+    evidenceCount > 0 && /^https:\/\/[^\s{}]+$/i.test(evidenceBaseFolder) ? `${evidenceBaseFolder}/${reportId}` : '';
   const category = getCategoryForForm(form, cleanData);
 
   // Isolate identity data
@@ -385,7 +389,8 @@ export function dispatchPowerAutomateFlow(
     restore,
     dateReported: data.dateReported || new Date().toISOString().split('T')[0],
     category,
-    reporting: data.reporting,
+    // 'Named' reports are called "Open" everywhere people see them (Excel, emails)
+    reporting: data.reporting === 'Named' ? 'Open' : data.reporting,
     name: isAnonymous ? '' : data.name || '',
     department: isAnonymous ? '' : data.department || '',
     position: isAnonymous ? '' : data.position || '',
@@ -422,7 +427,7 @@ export function dispatchPowerAutomateFlow(
   return true;
 }
 
-const ALL_FORMS: FormType[] = ['hazard', 'incident', 'accident', 'concern'];
+const ALL_FORMS: FormType[] = ALL_REPORT_FORMS;
 
 function sortNewestFirst(list: BaseReportData[]): BaseReportData[] {
   const toMillis = (v: any): number => {
@@ -530,12 +535,22 @@ export function subscribeToAllReports(
 export async function updateReportMetadata(
   form: FormType,
   reportId: string,
-  updates: { status?: ReportStatus; notes?: string; deleted?: boolean; deletionRequest?: DeletionRequest }
+  updates: {
+    status?: ReportStatus;
+    notes?: string;
+    deleted?: boolean;
+    deletionRequest?: DeletionRequest;
+    reclassifiedTo?: FormType | null;
+    reclassification?: ReclassificationRecord;
+  }
 ): Promise<boolean> {
   if (db) {
     try {
       const ref = doc(db, form, reportId);
-      await updateDoc(ref, updates);
+      // null means "remove the field" (e.g. a case moved back to its original type)
+      const firestoreUpdates: Record<string, any> = { ...updates };
+      for (const [k, v] of Object.entries(firestoreUpdates)) if (v === null) firestoreUpdates[k] = deleteField();
+      await updateDoc(ref, firestoreUpdates);
       return true;
     } catch (e) {
       console.error('Failed to update report metadata:', e);
@@ -544,7 +559,9 @@ export async function updateReportMetadata(
   } else {
     const rep = inMemoryStore.reports.get(reportId);
     if (rep) {
-      inMemoryStore.reports.set(reportId, { ...rep, ...updates });
+      const merged: Record<string, any> = { ...rep, ...updates };
+      for (const [k, v] of Object.entries(updates)) if (v === null) delete merged[k];
+      inMemoryStore.reports.set(reportId, merged as BaseReportData);
       savePreviewStore();
       notifyInMemoryReportListeners();
       return true;
@@ -712,6 +729,31 @@ export async function requestReportDeletion(
   };
   const ok = await updateReportMetadata(report.form, report.reportId, { deletionRequest: request });
   return ok ? { ok } : { ok, error: 'Could not send the request. You may not have permission, or a request is already pending.' };
+}
+
+/**
+ * Manager: the case was submitted under the wrong report type. It keeps its case number and
+ * answers; the CMS shows and counts it under the new type, with a record of the change.
+ */
+export async function reclassifyReport(
+  report: BaseReportData,
+  to: FormType,
+  reason: string,
+  manager: { uid: string; email?: string | null }
+): Promise<boolean> {
+  const current = report.reclassifiedTo || report.form;
+  if (to === current) return true;
+  const record: ReclassificationRecord = {
+    from: current,
+    to,
+    by: manager.uid,
+    byEmail: manager.email || '',
+    at: db ? serverTimestamp() : new Date().toISOString(),
+    reason: reason.trim().slice(0, 500)
+  };
+  // Moving back to the type it was submitted as clears the override
+  const reclassifiedTo = to === report.form ? null : to;
+  return updateReportMetadata(report.form, report.reportId, { reclassifiedTo, reclassification: record });
 }
 
 /** Manager: approve (archives the report) or reject a pending deletion request. */

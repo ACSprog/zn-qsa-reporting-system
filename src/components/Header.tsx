@@ -78,27 +78,15 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           <button
-            onClick={() => onSelectForm('incident')}
+            onClick={() => onSelectForm('occurrence')}
             className={`px-3.5 py-1.5 rounded-md shrink-0 transition-all flex items-center gap-1.5 font-bold ${
-              currentView === 'form' && selectedForm === 'incident'
-                ? 'bg-[#0284c7] text-white shadow-xs'
-                : 'text-emerald-100 hover:bg-[#14522a] hover:text-white'
-            }`}
-          >
-            <AlertCircle className="w-3.5 h-3.5 text-sky-300" />
-            Incident (INC)
-          </button>
-
-          <button
-            onClick={() => onSelectForm('accident')}
-            className={`px-3.5 py-1.5 rounded-md shrink-0 transition-all flex items-center gap-1.5 font-bold ${
-              currentView === 'form' && selectedForm === 'accident'
+              currentView === 'form' && selectedForm === 'occurrence'
                 ? 'bg-[#DE2010] text-white shadow-xs'
                 : 'text-emerald-100 hover:bg-[#14522a] hover:text-white'
             }`}
           >
             <Shield className="w-3.5 h-3.5 text-rose-300" />
-            Accident (ACC)
+            Incident / Accident (IA)
           </button>
 
           <button
