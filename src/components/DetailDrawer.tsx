@@ -678,16 +678,21 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
                 <span className="text-slate-400 block">Location / Station</span>
                 <span className="font-semibold text-slate-800">{report.location}</span>
               </div>
-              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                <span className="text-slate-400 block">Flight No.</span>
-                <span className="font-semibold text-slate-800">{report.flightNo || '—'}</span>
-              </div>
-              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                <span className="text-slate-400 block">Aircraft Reg & Type</span>
-                <span className="font-semibold text-slate-800">
-                  {report.aircraftReg || '—'} {report.aircraftType ? `(${report.aircraftType})` : ''}
-                </span>
-              </div>
+              {/* No longer asked on the forms: only shown for older reports that have them */}
+              {(report.flightNo || report.aircraftReg || report.aircraftType) && (
+                <>
+                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                    <span className="text-slate-400 block">Flight No.</span>
+                    <span className="font-semibold text-slate-800">{report.flightNo || '—'}</span>
+                  </div>
+                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                    <span className="text-slate-400 block">Aircraft Reg & Type</span>
+                    <span className="font-semibold text-slate-800">
+                      {report.aircraftReg || '—'} {report.aircraftType ? `(${report.aircraftType})` : ''}
+                    </span>
+                  </div>
+                </>
+              )}
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                 <span className="text-slate-400 block">Urgent Attention?</span>
                 <span className={`font-bold ${report.urgent === 'Yes' ? 'text-rose-600' : 'text-slate-800'}`}>

@@ -45,7 +45,7 @@ export const FORMS_META: Record<FormType, FormMeta> = {
       'Report an accident, incident or near miss that has happened during work or operations, whether or not anyone was injured or anything was damaged.',
     example: 'An aircraft ground collision, equipment damage, a slip or fall, or a near miss between aircraft and ground vehicles.',
     categoryField: 'incidentType',
-    askFlightDetails: true
+    askFlightDetails: false
   },
   incident: {
     type: 'incident',
@@ -55,7 +55,7 @@ export const FORMS_META: Record<FormType, FormMeta> = {
     tableName: 'tblIncident',
     useWhen: 'Use when an unplanned event has occurred. Report what happened; QSA will determine the required follow-up.',
     categoryField: 'incidentType',
-    askFlightDetails: true
+    askFlightDetails: false
   },
   accident: {
     type: 'accident',
@@ -65,7 +65,7 @@ export const FORMS_META: Record<FormType, FormMeta> = {
     tableName: 'tblAccident',
     useWhen: 'Use when an occurrence has resulted in actual injury, death, significant damage or another serious consequence. Report facts only.',
     categoryField: '',
-    askFlightDetails: true
+    askFlightDetails: false
   },
   concern: {
     type: 'concern',
@@ -76,7 +76,7 @@ export const FORMS_META: Record<FormType, FormMeta> = {
     useWhen: 'Raise any safety-related worry or issue that you believe needs attention or improvement.',
     example: 'Repeated unsafe practices, inadequate training, fatigue or unclear safety procedures.',
     categoryField: 'concernCategory',
-    askFlightDetails: true
+    askFlightDetails: false
   }
 };
 
