@@ -222,3 +222,7 @@ Use this checklist to verify production readiness:
   - Open `/admin`, open that report, and click **Sync to Excel**.
   - Wait a minute: verify the row and the evidence files are restored, with no new email notification.
   - Click **Sync to Excel** again: verify nothing is duplicated.
+
+### Deleting cases
+- **Archive** (Managers and Super Admins) hides a case but keeps it; it can be restored. Officers can request it.
+- **Delete permanently** (Super Admins only): the bin button next to **Inspect**, or **Delete permanently** in the case view. You must type the case number and give a reason. It removes the case, its evidence files and the reporter's identity for good. An audit record (case number, who, when, reason; no case content) is kept in `caseDeletions/{reportId}`. Rows already copied to Excel / SharePoint are **not** removed.

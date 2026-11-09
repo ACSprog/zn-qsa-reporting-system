@@ -37,7 +37,7 @@ export const FORMS_META: Record<FormType, FormMeta> = {
   },
   occurrence: {
     type: 'occurrence',
-    title: 'Incident / Accident Report',
+    title: 'Accident / Incident Report',
     prefix: 'IA',
     collection: 'occurrence',
     tableName: 'tblOccurrence',

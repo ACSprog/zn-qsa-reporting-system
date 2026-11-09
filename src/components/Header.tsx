@@ -86,7 +86,7 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <Shield className="w-3.5 h-3.5 text-rose-300" />
-            Incident / Accident (IA)
+            Accident / Incident (IA)
           </button>
 
           <button

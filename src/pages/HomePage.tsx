@@ -152,7 +152,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
               </div>
 
               <h3 className="text-xl font-extrabold text-slate-900 group-hover:text-[#DE2010] transition-colors">
-                Incident / Accident Report
+                Accident / Incident Report
               </h3>
 
               <div className="mt-2 text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -169,7 +169,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-sm font-bold text-[#DE2010] group-hover:translate-x-1 transition-transform">
-              <span>Open Incident / Accident Form</span>
+              <span>Open Accident / Incident Form</span>
               <ArrowRight className="w-4 h-4" />
             </div>
           </div>
