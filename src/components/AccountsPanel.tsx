@@ -41,7 +41,7 @@ import {
   ALL_ROLES,
   getRequire2fa,
   setRequire2fa,
-  setAccountTwoFactorOff,
+  setAccountTwoFactor,
   reset2faCommand
 } from '../lib/accounts';
 import { CmsRole } from '../types';
@@ -229,25 +229,31 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
     }
   };
 
-  // Super Admin: stop (or restore) two-step sign-in for one person
+  // Is 2FA required for this person right now? (their own setting wins over "everyone")
+  const twoFactorOn = (acc: CmsAccount) => acc.twoFactor === 'on' || (require2fa === true && acc.twoFactor !== 'off');
+
+  // Super Admin: start or stop two-step sign-in for one person
   const handleTwoFactorToggle = async (acc: CmsAccount) => {
     const who = acc.name || acc.email || acc.uid;
-    const off = !acc.twoFactorOff;
+    const mode: 'on' | 'off' = twoFactorOn(acc) ? 'off' : 'on';
     if (
       !window.confirm(
-        off
+        mode === 'off'
           ? `Stop 2FA for ${who}?\n\nThey will sign in with just their password. If they already use an authenticator app, it is asked for one last time at their next sign-in and then removed.\n\nIf their phone is lost they can't give that last code: use "Reset 2FA" instead.`
-          : `Turn 2FA back on for ${who}?\n\nWhile 2FA is required for everyone, they will be asked to set up their authenticator app at their next sign-in.`
+          : `Start 2FA for ${who}?\n\nThey will be asked to set up an authenticator app (Google or Microsoft Authenticator) straight away, or at their next sign-in, and then enter its code every time they sign in.`
       )
     )
       return;
     setBusyUid(acc.uid);
     setListNotice(null);
     try {
-      await setAccountTwoFactorOff(acc, off);
+      await setAccountTwoFactor(acc, mode);
       setListNotice({
         kind: 'ok',
-        text: off ? `2FA stopped for ${who}. Only their account is affected.` : `2FA is back on for ${who}.`
+        text:
+          mode === 'off'
+            ? `2FA stopped for ${who}. Only their account is affected.`
+            : `2FA started for ${who}. They set up their authenticator app at their next sign-in.`
       });
       await refresh();
     } catch (e: any) {
@@ -402,7 +408,10 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                     <strong>Stop 2FA</strong> on their row below.
                   </>
                 ) : (
-                  <strong className="text-amber-700">Not required</strong>
+                  <>
+                    <strong className="text-amber-700">Not required for everyone</strong>. Use <strong>Start 2FA</strong> on a
+                    row to require it for one person.
+                  </>
                 )}
               </p>
             </div>
@@ -521,12 +530,22 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                             <Lock className="w-2.5 h-2.5" /> LOCKED
                           </span>
                         )}
-                        {acc.twoFactorOff && (
+                        {isSuperAdmin && require2fa !== null && (
                           <span
-                            title="A Super Admin stopped two-step sign-in for this user"
-                            className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-200 text-slate-600"
+                            title={
+                              acc.twoFactor === 'on'
+                                ? 'A Super Admin started two-step sign-in for this user'
+                                : acc.twoFactor === 'off'
+                                  ? 'A Super Admin stopped two-step sign-in for this user'
+                                  : require2fa
+                                    ? 'Two-step sign-in is required for everyone'
+                                    : 'Two-step sign-in is not required for this user'
+                            }
+                            className={`text-[9px] font-black px-1.5 py-0.5 rounded ${
+                              twoFactorOn(acc) ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                            }`}
                           >
-                            2FA OFF
+                            {twoFactorOn(acc) ? '2FA ON' : '2FA OFF'}
                           </span>
                         )}
                       </div>
@@ -619,18 +638,18 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ currentUid, curren
                             title={
                               isMe
                                 ? 'You cannot change your own 2FA. Another Super Admin can.'
-                                : acc.twoFactorOff
-                                  ? 'Ask this user for 2FA again'
-                                  : 'Stop two-step sign-in for this user only'
+                                : twoFactorOn(acc)
+                                  ? 'Stop two-step sign-in for this user only'
+                                  : 'Require two-step sign-in for this user only'
                             }
                             className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border font-bold disabled:opacity-40 ${
-                              acc.twoFactorOff
-                                ? 'border-emerald-200 hover:bg-emerald-50 text-emerald-700'
-                                : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                              twoFactorOn(acc)
+                                ? 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                                : 'border-emerald-200 hover:bg-emerald-50 text-emerald-700'
                             }`}
                           >
-                            {acc.twoFactorOff ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldOff className="w-3.5 h-3.5" />}
-                            {acc.twoFactorOff ? 'Turn 2FA back on' : 'Stop 2FA'}
+                            {twoFactorOn(acc) ? <ShieldOff className="w-3.5 h-3.5" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                            {twoFactorOn(acc) ? 'Stop 2FA' : 'Start 2FA'}
                           </button>
                         )}
                         {isSuperAdmin && (

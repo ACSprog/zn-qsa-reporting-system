@@ -82,8 +82,8 @@ export interface CmsAccount {
   blocked: boolean;
   /** Super Admins only: a change another Super Admin asked them to confirm */
   pendingAction?: PendingAdminAction;
-  /** A Super Admin switched two-step sign-in off for this user */
-  twoFactorOff?: boolean;
+  /** Per-person 2FA setting from a Super Admin: 'on', 'off', or undefined = follow everyone */
+  twoFactor?: 'on' | 'off';
   /** Locked after 5 wrong passwords (a password reset email from a Manager unlocks it) */
   locked?: boolean;
   /** Wrong passwords since their last successful sign-in */
@@ -230,7 +230,7 @@ export async function listCmsAccounts(): Promise<CmsAccount[]> {
         mustChangePassword: data.mustChangePassword === true,
         blocked: data.enabled === false,
         pendingAction: data.pendingAction || undefined,
-        twoFactorOff: data.twoFactorOff === true
+        twoFactor: data.twoFactor === 'on' || data.twoFactor === 'off' ? data.twoFactor : undefined
       });
     });
     qsaSnap.forEach((d) => {
@@ -405,30 +405,30 @@ export async function setAccountBlocked(account: CmsAccount, blocked: boolean): 
   }
 }
 
-/** Super Admin: switch two-step sign-in off (or back on) for one user. */
-export async function setAccountTwoFactorOff(account: CmsAccount, off: boolean): Promise<void> {
-  const { db } = getFirebaseHandles();
+/** Super Admin: start ('on') or stop ('off') two-step sign-in for one user. */
+export async function setAccountTwoFactor(account: CmsAccount, mode: 'on' | 'off'): Promise<void> {
+  const { db, firebaseConfig } = getFirebaseHandles();
   if (!db) {
     const cur = previewAccounts.get(account.uid);
-    if (cur) cur.twoFactorOff = off;
+    if (cur) cur.twoFactor = mode;
     return;
   }
   try {
     if (account.role === 'superadmin') {
       // Only this field may change on another Super Admin's record
-      await updateDoc(doc(db, 'admins', account.uid), { twoFactorOff: off });
+      await updateDoc(doc(db, 'admins', account.uid), { twoFactor: mode });
     } else {
       // Older records may lack enabled/email/role, which the rules require on every save
       await setDoc(
         doc(db, 'admins', account.uid),
-        { twoFactorOff: off, enabled: !account.blocked, email: account.email || '', role: account.role },
+        { twoFactor: mode, enabled: !account.blocked, email: account.email || '', role: account.role },
         { merge: true }
       );
     }
   } catch (e: any) {
     if (e?.code === 'permission-denied') {
       throw new Error(
-        'Permission denied. Only Super Admins can stop 2FA, and not on their own account. If you are a Super Admin, the latest security rules are probably not published yet: run  firebase deploy --only firestore:rules --project <project-id>'
+        `Permission denied. Only Super Admins can start or stop 2FA, and not on their own account. If you are a Super Admin, the latest security rules are not published yet. In the project folder run:  firebase deploy --only firestore:rules --project ${firebaseConfig?.projectId || '<project-id>'}`
       );
     }
     throw new Error(friendlyError(e));
