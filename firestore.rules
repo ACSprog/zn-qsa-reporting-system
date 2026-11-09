@@ -349,7 +349,9 @@ service cloud.firestore {
           && isManager())
       );
 
-      allow delete: if false;
+      // Permanent deletion: Super Admins only (the CMS also deletes the evidence files and the
+      // reporter's identity, and writes an audit record to caseDeletions/{reportId})
+      allow delete: if isReportForm(form) && isSuperAdmin();
 
       // Evidence subcollection (1 to 5 files per report)
       match /evidence/{n} {
@@ -361,7 +363,8 @@ service cloud.firestore {
           && request.resource.data.data.size() < 850000
           && request.resource.data.createdAt == request.time;
         allow read: if isAdmin();
-        allow update, delete: if false;
+        allow update: if false;
+        allow delete: if isSuperAdmin();
       }
     }
 
@@ -377,6 +380,19 @@ service cloud.firestore {
         && request.resource.data.position is string && request.resource.data.position.size() <= 300
         && request.resource.data.contact is string && request.resource.data.contact.size() <= 300;
       allow read: if isManager();
+      allow update: if false;
+      allow delete: if isSuperAdmin();
+    }
+
+    // Audit trail of permanently deleted cases: who, when, which case, why. No case content.
+    match /caseDeletions/{reportId} {
+      allow read: if isManager();
+      allow create: if request.resource.data.keys().hasOnly(['reportId', 'form', 'deletedBy', 'deletedByEmail', 'deletedAt', 'reason'])
+        && request.resource.data.reportId == reportId
+        && request.resource.data.deletedBy == request.auth.uid
+        && request.resource.data.deletedAt == request.time
+        && request.resource.data.reason is string && request.resource.data.reason.size() <= 500
+        && isSuperAdmin();
       allow update, delete: if false;
     }
   }

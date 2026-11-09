@@ -29,8 +29,10 @@ import {
   KeyRound,
   X,
   Users,
-  Home
+  Home,
+  Trash2
 } from 'lucide-react';
+import { confirmAndDeleteCase } from '../lib/caseDeletion';
 import {
   BaseReportData,
   CmsRole,
@@ -1285,7 +1287,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                   {[
                     { id: 'all', label: 'All Reports' },
                     { id: 'hazard', label: 'Hazards (HAZ)' },
-                    { id: 'occurrence', label: 'Incidents / Accidents (IA)' },
+                    { id: 'occurrence', label: 'Accidents / Incidents (IA)' },
                     { id: 'concern', label: 'Concerns (SC)' }
                   ].map((tab) => (
                     <button
@@ -1433,7 +1435,6 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                       <th className="py-3 px-4">Type</th>
                       <th className="py-3 px-4">Date Reported</th>
                       <th className="py-3 px-4">Location</th>
-                      <th className="py-3 px-4">Flight / Reg</th>
                       <th className="py-3 px-4">Urgent</th>
                       <th className="py-3 px-4">Evidence</th>
                       <th className="py-3 px-4">Status</th>
@@ -1443,7 +1444,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                   <tbody className="divide-y divide-slate-200 font-medium">
                     {filteredReports.length === 0 ? (
                       <tr>
-                        <td colSpan={10} className="py-12 text-center text-slate-500">
+                        <td colSpan={9} className="py-12 text-center text-slate-500">
                           <FolderOpen className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                           <p className="font-bold">No safety reports match your filters</p>
                           <p className="text-[11px] text-slate-400 mt-1">Try adjusting the search criteria or status filter.</p>
@@ -1495,9 +1496,6 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                           <td className="py-3.5 px-4 text-slate-800 max-w-[160px] truncate" title={report.location}>
                             {report.location || '-'}
                           </td>
-                          <td className="py-3.5 px-4 font-mono text-slate-600">
-                            {report.flightNo ? report.flightNo : report.aircraftReg || '-'}
-                          </td>
                           <td className="py-3.5 px-4">
                             {isOpenUrgent(report) ? (
                               <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-[#DE2010] text-white animate-pulse">
@@ -1541,7 +1539,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                               </span>
                             )}
                           </td>
-                          <td className="py-3.5 px-4 text-right">
+                          <td className="py-3.5 px-4 text-right whitespace-nowrap">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1551,6 +1549,24 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                             >
                               Inspect
                             </button>
+                            {role === 'superadmin' && (
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (!currentUser) return;
+                                  try {
+                                    if (await confirmAndDeleteCase(report, currentUser)) loadReports();
+                                  } catch (err: any) {
+                                    window.alert(err.message);
+                                  }
+                                }}
+                                title="Delete permanently"
+                                aria-label={`Delete ${report.reportId} permanently`}
+                                className="ml-1.5 p-1.5 rounded-md border border-rose-200 text-rose-600 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all align-middle"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))

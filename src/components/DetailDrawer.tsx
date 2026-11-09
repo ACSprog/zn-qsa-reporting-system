@@ -45,6 +45,7 @@ import { isOpenUrgent, isUsableLink, reportingLabel, effectiveForm } from '../li
 import { ACTIVE_FORMS, FormType } from '../types';
 import { triggerFileDownload } from '../lib/evidence';
 import { restoreReportToExcel } from '../lib/restoreToExcel';
+import { confirmAndDeleteCase } from '../lib/caseDeletion';
 
 interface DetailDrawerProps {
   report: BaseReportData | null;
@@ -229,6 +230,19 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
       onClose();
     } else {
       setDeletionMessage({ kind: 'error', text: 'Could not update the report. You may not have permission.' });
+    }
+  };
+
+  // Super Admin: delete the case for good
+  const handlePermanentDelete = async () => {
+    if (!currentUser) return;
+    try {
+      if (await confirmAndDeleteCase(report, currentUser)) {
+        onReportUpdated();
+        onClose();
+      }
+    } catch (e: any) {
+      setDeletionMessage({ kind: 'error', text: e.message });
     }
   };
 
@@ -791,6 +805,18 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
                     <span>Archive Report</span>
                   </>
                 )}
+              </button>
+            )}
+
+            {role === 'superadmin' && (
+              <button
+                type="button"
+                onClick={handlePermanentDelete}
+                title="Delete this case, its evidence and the reporter's details for good"
+                className="mt-2 text-xs font-semibold px-3 py-1.5 rounded border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete permanently</span>
               </button>
             )}
 

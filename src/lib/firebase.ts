@@ -536,6 +536,51 @@ export function subscribeToAllReports(
 /**
  * Update report status, notes or archive status (admin only)
  */
+/**
+ * Super Admin: permanently delete a case. An audit record (who, when, case number, reason;
+ * no case content) is written first, then the evidence files, the reporter's identity and
+ * the case itself are removed. Excel/SharePoint rows are not touched.
+ */
+export async function permanentlyDeleteReport(
+  form: FormType,
+  reportId: string,
+  reason: string,
+  by: { uid: string; email?: string | null }
+): Promise<{ ok: boolean; error?: string }> {
+  if (!db) {
+    inMemoryStore.reports.delete(reportId);
+    inMemoryStore.evidence.delete(reportId);
+    inMemoryStore.identities.delete(reportId);
+    savePreviewStore();
+    notifyInMemoryReportListeners();
+    return { ok: true };
+  }
+  try {
+    await setDoc(doc(db, 'caseDeletions', reportId), {
+      reportId,
+      form,
+      deletedBy: by.uid,
+      deletedByEmail: by.email || '',
+      deletedAt: serverTimestamp(),
+      reason: reason.slice(0, 500)
+    });
+    // One request per document keeps each well inside Firestore's lookup limit for rules
+    for (const n of ['1', '2', '3', '4', '5']) await deleteDoc(doc(db, form, reportId, 'evidence', n));
+    await deleteDoc(doc(db, 'identities', reportId));
+    await deleteDoc(doc(db, form, reportId));
+    return { ok: true };
+  } catch (e: any) {
+    console.error('Permanent delete failed:', e);
+    return {
+      ok: false,
+      error:
+        e?.code === 'permission-denied'
+          ? 'Permission denied. Only Super Admins can delete cases permanently, and the latest security rules must be published.'
+          : e?.message || String(e)
+    };
+  }
+}
+
 export async function updateReportMetadata(
   form: FormType,
   reportId: string,
