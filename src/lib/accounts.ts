@@ -30,6 +30,7 @@ import {
   setDoc,
   updateDoc,
   deleteField,
+  deleteDoc,
   serverTimestamp
 } from 'firebase/firestore';
 import { getFirebaseHandles, usingEmulators, tempPasswordFingerprint, sendPasswordLinkEmail } from './firebase';
@@ -81,6 +82,12 @@ export interface CmsAccount {
   blocked: boolean;
   /** Super Admins only: a change another Super Admin asked them to confirm */
   pendingAction?: PendingAdminAction;
+  /** A Super Admin switched two-step sign-in off for this user */
+  twoFactorOff?: boolean;
+  /** Locked after 5 wrong passwords (a password reset email from a Manager unlocks it) */
+  locked?: boolean;
+  /** Wrong passwords since their last successful sign-in */
+  failedAttempts?: number;
 }
 
 export interface AddAccountInput {
@@ -222,7 +229,8 @@ export async function listCmsAccounts(): Promise<CmsAccount[]> {
         legacyManager: false,
         mustChangePassword: data.mustChangePassword === true,
         blocked: data.enabled === false,
-        pendingAction: data.pendingAction || undefined
+        pendingAction: data.pendingAction || undefined,
+        twoFactorOff: data.twoFactorOff === true
       });
     });
     qsaSnap.forEach((d) => {
@@ -243,6 +251,23 @@ export async function listCmsAccounts(): Promise<CmsAccount[]> {
       cur.name = cur.name || data.name || '';
       byUid.set(d.id, cur);
     });
+    // Wrong-password counters (needs the latest firestore.rules; skipped if not deployed yet)
+    try {
+      const locks = new Map<string, { failures: number; locked: boolean }>();
+      (await getDocs(collection(db, 'signInLocks'))).forEach((d) => {
+        const data = d.data() || {};
+        locks.set(d.id, { failures: Number(data.failures) || 0, locked: data.locked === true });
+      });
+      byUid.forEach((acc) => {
+        const l = acc.email ? locks.get(acc.email.toLowerCase()) : undefined;
+        if (l) {
+          acc.locked = l.locked;
+          acc.failedAttempts = l.failures;
+        }
+      });
+    } catch {
+      /* older rules */
+    }
     return Array.from(byUid.values()).sort((a, b) => (a.email || a.uid).localeCompare(b.email || b.uid));
   } catch (e) {
     throw new Error(friendlyError(e));
@@ -380,6 +405,21 @@ export async function setAccountBlocked(account: CmsAccount, blocked: boolean): 
   }
 }
 
+/** Super Admin: switch two-step sign-in off (or back on) for one user. */
+export async function setAccountTwoFactorOff(account: CmsAccount, off: boolean): Promise<void> {
+  const { db } = getFirebaseHandles();
+  if (!db) {
+    const cur = previewAccounts.get(account.uid);
+    if (cur) cur.twoFactorOff = off;
+    return;
+  }
+  try {
+    await updateDoc(doc(db, 'admins', account.uid), { twoFactorOff: off });
+  } catch (e) {
+    throw new Error(friendlyError(e));
+  }
+}
+
 /**
  * Removes all CMS access. The Firebase login itself remains (deleting logins needs a
  * server), but it can no longer open the CMS or read reports.
@@ -400,15 +440,32 @@ export async function removeCmsAccount(account: CmsAccount): Promise<void> {
   }
 }
 
-/** E-mails the user a link to choose a new password. */
-export async function sendAccountPasswordReset(email: string): Promise<void> {
-  const { auth } = getFirebaseHandles();
-  if (!auth) return; // preview mode
+/**
+ * E-mails the user a link to choose a new password. Also unlocks the account if it was
+ * locked after too many wrong passwords. Returns true if it was locked.
+ */
+export async function sendAccountPasswordReset(email: string): Promise<boolean> {
+  const { auth, db } = getFirebaseHandles();
+  if (!auth) return false; // preview mode
+  let wasLocked = false;
+  if (db) {
+    const ref = doc(db, 'signInLocks', email.trim().toLowerCase());
+    try {
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        wasLocked = snap.data()?.locked === true;
+        await deleteDoc(ref);
+      }
+    } catch (e) {
+      if (wasLocked) throw new Error(`Could not unlock the account: ${friendlyError(e)}`);
+    }
+  }
   try {
     await sendPasswordLinkEmail(email);
   } catch (e) {
     throw new Error(friendlyError(e));
   }
+  return wasLocked;
 }
 
 /** Changes the signed-in user's own password and clears any "must change" flag. */

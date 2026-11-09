@@ -14,6 +14,8 @@ import {
   where,
   orderBy,
   writeBatch,
+  runTransaction,
+  deleteDoc,
   serverTimestamp,
   onSnapshot,
   DocumentData
@@ -636,8 +638,12 @@ export interface UserRoles {
   mustChangePassword: boolean;
   /** Account exists but a Manager blocked it */
   blocked: boolean;
-  /** settings/security.require2fa */
+  /** settings/security.require2fa, unless a Super Admin switched 2FA off for this user */
   require2fa: boolean;
+  /** A Super Admin switched 2FA off for this user (admins/{uid}.twoFactorOff) */
+  twoFactorOff?: boolean;
+  /** Locked after too many wrong passwords */
+  locked?: boolean;
   /** Super Admins: a change to their own account another Super Admin asked them to confirm */
   pendingAction?: PendingAdminAction;
 }
@@ -663,6 +669,13 @@ export async function verifyUserRoles(user: User | { uid: string; email?: string
       if (!adminDoc.exists()) return none;
       const data = adminDoc.data() || {};
       if (data.enabled === false) return { ...none, blocked: true };
+      // Locked after 5 wrong passwords (the password may since have been guessed): no access.
+      // Otherwise this successful sign-in clears any earlier failed attempts.
+      if (user.email) {
+        const lock = await getSignInLock(user.email);
+        if (lock?.locked) return { ...none, locked: true };
+        if (lock && lock.failures > 0) await deleteDoc(doc(db, 'signInLocks', user.email.toLowerCase())).catch(() => undefined);
+      }
 
       // Still flagged as using a temporary password? If they just signed in with a different
       // password, they already chose their own (e.g. via the e-mailed link): clear the flag.
@@ -680,9 +693,10 @@ export async function verifyUserRoles(user: User | { uid: string; email?: string
       }
       const qsaDoc = await getDoc(doc(db, 'qsaAdmins', user.uid));
       let require2fa = false;
+      const twoFactorOff = data.twoFactorOff === true;
       try {
         const sec = await getDoc(doc(db, 'settings', 'security'));
-        require2fa = sec.exists() && sec.data()?.require2fa === true;
+        require2fa = sec.exists() && sec.data()?.require2fa === true && !twoFactorOff;
       } catch {
         // older rules without settings access: treat as not required
       }
@@ -703,6 +717,7 @@ export async function verifyUserRoles(user: User | { uid: string; email?: string
         mustChangePassword: data.mustChangePassword === true,
         blocked: false,
         require2fa,
+        twoFactorOff,
         pendingAction: data.pendingAction || undefined
       };
     } catch {
@@ -802,6 +817,60 @@ export async function decideDeletionRequest(
 let mockUser: any = null;
 const mockAuthListeners: Array<(user: any) => void> = [];
 
+/** Wrong passwords allowed before the account is locked (a Manager's password reset unlocks it). */
+export const MAX_SIGNIN_ATTEMPTS = 5;
+export const LOCKED_MESSAGE =
+  'This account is locked after 5 wrong passwords. Contact a QSA Manager or Super Admin and ask them to send you a password reset email.';
+
+export interface SignInLock {
+  failures: number;
+  locked: boolean;
+}
+
+/** Failed-sign-in record for an email (null if none, or it can't be read). */
+export async function getSignInLock(email: string): Promise<SignInLock | null> {
+  if (!db) return null;
+  const id = email.trim().toLowerCase();
+  if (!id) return null;
+  try {
+    const snap = await getDoc(doc(db, 'signInLocks', id));
+    if (!snap.exists()) return null;
+    const d = snap.data() || {};
+    return { failures: Number(d.failures) || 0, locked: d.locked === true };
+  } catch {
+    return null;
+  }
+}
+
+/** Adds one wrong password to the email's counter; the 5th locks the account. */
+async function recordFailedSignIn(email: string): Promise<SignInLock | null> {
+  if (!db) return null;
+  const ref = doc(db, 'signInLocks', email.trim().toLowerCase());
+  try {
+    return await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      const cur = snap.exists() ? snap.data() || {} : null;
+      if (cur?.locked === true) return { failures: Number(cur.failures) || MAX_SIGNIN_ATTEMPTS, locked: true };
+      const failures = (cur ? Number(cur.failures) || 0 : 0) + 1;
+      const locked = failures >= MAX_SIGNIN_ATTEMPTS;
+      if (!cur) {
+        tx.set(ref, { failures, locked: false, lastFailureAt: serverTimestamp() });
+      } else {
+        tx.update(ref, {
+          failures,
+          locked,
+          lastFailureAt: serverTimestamp(),
+          ...(locked ? { lockedAt: serverTimestamp() } : {})
+        });
+      }
+      return { failures, locked };
+    });
+  } catch (e) {
+    console.warn('[auth] Could not record the failed sign-in:', e);
+    return null;
+  }
+}
+
 /**
  * Authentication handlers
  */
@@ -816,6 +885,9 @@ export async function signInWithEmail(
 
   if (auth) {
     await authPersistenceReady;
+    if ((await getSignInLock(cleanEmail))?.locked) {
+      return { user: null, error: LOCKED_MESSAGE };
+    }
     pendingSignInPassword = { password, at: Date.now() };
     try {
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
@@ -831,7 +903,13 @@ export async function signInWithEmail(
         err.code === 'auth/wrong-password' ||
         err.code === 'auth/invalid-credential'
       ) {
-        message = 'Invalid email or password. Please check your credentials and try again.';
+        const lock = await recordFailedSignIn(cleanEmail);
+        if (lock?.locked) return { user: null, error: LOCKED_MESSAGE };
+        const left = lock ? MAX_SIGNIN_ATTEMPTS - lock.failures : null;
+        message =
+          left === null
+            ? 'Invalid email or password. Please check your credentials and try again.'
+            : `Invalid email or password. ${left} attempt${left === 1 ? '' : 's'} left before the account is locked.`;
       } else if (err.code === 'auth/invalid-email') {
         message = 'Please enter a valid email address.';
       } else if (err.code === 'auth/too-many-requests') {
@@ -953,6 +1031,9 @@ export async function sendResetPasswordEmail(
   }
 
   if (auth) {
+    if ((await getSignInLock(cleanEmail))?.locked) {
+      return { success: false, error: LOCKED_MESSAGE };
+    }
     try {
       await sendPasswordLinkEmail(cleanEmail);
       return { success: true };

@@ -29,6 +29,14 @@ function friendly(e: any): string {
   return e?.message || 'Something went wrong.';
 }
 
+/** Removes the signed-in user's own authenticator app(s) (after a Super Admin switched their 2FA off). */
+export async function removeOwnAuthenticator(user: User): Promise<void> {
+  const mf = multiFactor(user);
+  for (const f of mf.enrolledFactors.filter((x) => x.factorId === TotpMultiFactorGenerator.FACTOR_ID)) {
+    await mf.unenroll(f);
+  }
+}
+
 /** Is the signed-in user enrolled in authenticator-app 2FA? */
 export function isEnrolledIn2fa(user: User | null | undefined): boolean {
   if (!user || typeof (user as any).getIdToken !== 'function') return false;

@@ -11,11 +11,21 @@ service cloud.firestore {
       return 'sign_in_second_factor' in request.auth.token.firebase;
     }
 
-    // settings/security.require2fa (set by `npm run setup:firebase -- --enable-2fa`)
+    // settings/security.require2fa (set by `npm run setup:firebase -- --enable-2fa`).
+    // A Super Admin can switch 2FA off for one person (admins/{uid}.twoFactorOff).
     function twoFactorOk() {
       return !exists(/databases/$(database)/documents/settings/security)
         || get(/databases/$(database)/documents/settings/security).data.get('require2fa', false) != true
-        || has2fa();
+        || has2fa()
+        || get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('twoFactorOff', false) == true;
+    }
+
+    // Not locked after 5 wrong passwords (signInLocks/{email}); a Manager's password reset unlocks
+    function notLockedOut() {
+      let email = request.auth.token.get('email', '').lower();
+      return email == ''
+        || !exists(/databases/$(database)/documents/signInLocks/$(email))
+        || get(/databases/$(database)/documents/signInLocks/$(email)).data.get('locked', false) != true;
     }
 
     // Backstop for the CMS session limit: refuse sessions signed in more than 12 hours ago
@@ -30,6 +40,7 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('enabled', true) != false
         && twoFactorOk()
+        && notLockedOut()
         && sessionFresh();
     }
 
@@ -83,7 +94,8 @@ service cloud.firestore {
     // Role documents written by Managers. Only these fields are allowed.
     function validRoleDoc() {
       let d = request.resource.data;
-      return d.keys().hasOnly(['enabled', 'email', 'name', 'role', 'mustChangePassword', 'tempPasswordHash', 'createdAt', 'createdBy', 'pendingAction'])
+      return d.keys().hasOnly(['enabled', 'email', 'name', 'role', 'mustChangePassword', 'tempPasswordHash', 'createdAt', 'createdBy', 'pendingAction', 'twoFactorOff'])
+        && d.get('twoFactorOff', false) is bool
         && d.enabled is bool
         && d.email is string && d.email.size() <= 320
         && d.get('role', 'officer') in ['viewer', 'officer', 'manager', 'superadmin']
@@ -159,9 +171,12 @@ service cloud.firestore {
       allow read: if isSignedIn() && (request.auth.uid == uid || isManager());
       allow create: if isManager() && request.auth.uid != uid && validRoleDoc()
         && !('pendingAction' in request.resource.data)
+        && !('twoFactorOff' in request.resource.data)
         && (isSuperAdmin() || juniorRole(request.resource.data.get('role', 'officer')));
       allow update: if isManager() && request.auth.uid != uid && validRoleDoc()
         && !adminChanges().hasAny(['pendingAction'])
+        // switching 2FA off/on for one person is for Super Admins only
+        && (!adminChanges().hasAny(['twoFactorOff']) || isSuperAdmin())
         && ((isSuperAdmin() && !isSuperAdminDoc(resource.data))
           || (juniorRole(request.resource.data.get('role', 'officer'))
             && juniorRole(resource.data.get('role', 'officer'))
@@ -170,6 +185,10 @@ service cloud.firestore {
       allow update: if isSuperAdmin() && request.auth.uid != uid && isSuperAdminDoc(resource.data)
         && adminChanges().hasOnly(['enabled']) && request.resource.data.enabled == true;
       allow update: if isPendingActionRequest(uid) || isPendingActionCancel(uid) || isOwnPendingActionAnswer(uid);
+      // Super Admin switching 2FA off/on for another Super Admin (nobody can for themselves)
+      allow update: if isSuperAdmin() && request.auth.uid != uid && isSuperAdminDoc(resource.data)
+        && adminChanges().hasOnly(['twoFactorOff'])
+        && request.resource.data.twoFactorOff is bool;
       // A user may only clear their own "must change password" flag (and the temporary
       // password fingerprint) once they use a password of their own
       allow update: if isSignedIn() && request.auth.uid == uid
@@ -195,17 +214,41 @@ service cloud.firestore {
     }
 
     // Security settings: readable by signed-in users so the CMS knows whether 2FA is required.
-    // Super Admins can switch the 2FA requirement on or off from the CMS. Turning it ON is only
-    // allowed from a session that itself used 2FA, which proves authenticator codes work for this
-    // project (otherwise everyone could be locked out). The setup script can always change it.
     match /settings/{doc} {
       allow read: if isSignedIn();
       allow create, update: if doc == 'security'
         && isSuperAdmin()
         && request.resource.data.keys().hasOnly(['require2fa', 'updatedBy', 'updatedAt'])
-        && request.resource.data.require2fa is bool
-        && (request.resource.data.require2fa == false || has2fa());
+        // From the CMS 2FA can only be switched ON for everyone (from a session that used 2FA).
+        // Stopping it is done per person; the setup script (--relax-2fa) is the emergency switch.
+        && request.resource.data.require2fa == true
+        && has2fa();
       allow delete: if false;
+    }
+
+    // Failed sign-in counter per email (document ID = lower-case email). The sign-in page,
+    // before anyone is signed in, may only add ONE failure at a time; the 5th failure locks
+    // the account. Only a Manager can unlock (their "Send password reset mail" deletes it).
+    // The user may clear their own counter after a successful sign-in, unless locked.
+    match /signInLocks/{email} {
+      allow get: if true;
+      allow list: if isManager();
+      allow create: if email == email.lower() && email.size() <= 320
+        && request.resource.data.keys().hasOnly(['failures', 'locked', 'lastFailureAt'])
+        && request.resource.data.failures == 1
+        && request.resource.data.locked == false
+        && request.resource.data.lastFailureAt == request.time;
+      allow update: if resource.data.get('locked', false) == false
+        && request.resource.data.keys().hasOnly(['failures', 'locked', 'lastFailureAt', 'lockedAt'])
+        && request.resource.data.failures == resource.data.failures + 1
+        && request.resource.data.lastFailureAt == request.time
+        && request.resource.data.locked == (request.resource.data.failures >= 5)
+        && (request.resource.data.locked
+          ? request.resource.data.get('lockedAt', null) == request.time
+          : !('lockedAt' in request.resource.data));
+      allow delete: if isManager()
+        || (isSignedIn() && request.auth.token.get('email', '').lower() == email
+          && resource.data.get('locked', false) == false);
     }
 
     // Announcement queue (e.g. scheduled maintenance): shown to everyone, public forms too,
