@@ -32,7 +32,7 @@ import {
   Home,
   Trash2
 } from 'lucide-react';
-import { confirmAndDeleteCase } from '../lib/caseDeletion';
+import { confirmAndDeleteCase, confirmAndBulkDelete } from '../lib/caseDeletion';
 import {
   BaseReportData,
   CmsRole,
@@ -490,6 +490,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
       return true;
     });
   }, [
+
     reports,
     selectedCategoryTab,
     statusFilter,
@@ -502,6 +503,49 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
     searchQuery,
     showArchived
   ]);
+
+  // Super Admin bulk delete: ticked cases (only ones still visible with the current filters)
+  const canBulkDelete = role === 'superadmin';
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkStatus, setBulkStatus] = useState<{ kind: 'busy' | 'ok' | 'error'; text: string } | null>(null);
+  const visibleIds = useMemo(() => new Set(filteredReports.map((r) => r.reportId)), [filteredReports]);
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [visibleIds]);
+  const toggleSelected = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const allVisibleSelected = filteredReports.length > 0 && filteredReports.every((r) => selectedIds.has(r.reportId));
+  const toggleSelectAll = () =>
+    setSelectedIds(allVisibleSelected ? new Set() : new Set(filteredReports.map((r) => r.reportId)));
+  const handleBulkDelete = async () => {
+    if (!currentUser) return;
+    const chosen = filteredReports.filter((r) => selectedIds.has(r.reportId));
+    const res = await confirmAndBulkDelete(chosen, currentUser, (done, total) =>
+      setBulkStatus({ kind: 'busy', text: `Deleting ${Math.min(done + 1, total)} of ${total}…` })
+    );
+    if (!res) {
+      setBulkStatus(null);
+      return;
+    }
+    setSelectedIds(new Set(res.failed.map((f) => f.reportId)));
+    setBulkStatus(
+      res.failed.length === 0
+        ? { kind: 'ok', text: `${res.deleted.length} case${res.deleted.length === 1 ? '' : 's'} deleted permanently.` }
+        : {
+            kind: 'error',
+            text: `${res.deleted.length} deleted, ${res.failed.length} could not be deleted (still ticked): ${res.failed[0].error}`
+          }
+    );
+    loadReports();
+  };
 
   // Export to Excel / CSV
   const handleExport = async (format: 'xlsx' | 'csv') => {
@@ -1425,11 +1469,68 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                 </div>
               </div>
 
+              {/* Super Admin: bulk delete bar */}
+              {canBulkDelete && (selectedIds.size > 0 || bulkStatus) && (
+                <div className="px-4 py-2.5 border-b border-rose-200 bg-rose-50 flex flex-wrap items-center gap-3 text-xs">
+                  {selectedIds.size > 0 && (
+                    <>
+                      <span className="font-bold text-rose-900">
+                        {selectedIds.size} case{selectedIds.size === 1 ? '' : 's'} selected
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedIds(new Set())}
+                        disabled={bulkStatus?.kind === 'busy'}
+                        className="font-semibold text-slate-600 hover:text-slate-900 underline disabled:opacity-50"
+                      >
+                        Clear
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleBulkDelete}
+                        disabled={bulkStatus?.kind === 'busy'}
+                        className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#DE2010] hover:bg-[#b81a0d] text-white font-bold disabled:opacity-50"
+                      >
+                        {bulkStatus?.kind === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                        Delete selected permanently ({selectedIds.size})
+                      </button>
+                    </>
+                  )}
+                  {bulkStatus && (
+                    <span
+                      className={`w-full font-semibold ${
+                        bulkStatus.kind === 'error' ? 'text-rose-700' : bulkStatus.kind === 'ok' ? 'text-emerald-700' : 'text-slate-700'
+                      }`}
+                    >
+                      {bulkStatus.text}
+                      {bulkStatus.kind !== 'busy' && (
+                        <button type="button" onClick={() => setBulkStatus(null)} className="ml-2 underline text-slate-500">
+                          Dismiss
+                        </button>
+                      )}
+                    </span>
+                  )}
+                </div>
+              )}
+
               {/* Table Data */}
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-100/80 text-slate-700 font-extrabold uppercase tracking-wider border-b border-slate-200">
                     <tr>
+                      {canBulkDelete && (
+                        <th className="py-3 pl-4 pr-0 w-8">
+                          <input
+                            type="checkbox"
+                            checked={allVisibleSelected}
+                            onChange={toggleSelectAll}
+                            disabled={filteredReports.length === 0 || bulkStatus?.kind === 'busy'}
+                            title="Select all cases shown"
+                            aria-label="Select all cases shown"
+                            className="w-4 h-4 accent-[#DE2010] cursor-pointer"
+                          />
+                        </th>
+                      )}
                       <th className="py-3 px-4">Report ID</th>
                       <th className="py-3 px-4">Form</th>
                       <th className="py-3 px-4">Type</th>
@@ -1444,7 +1545,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                   <tbody className="divide-y divide-slate-200 font-medium">
                     {filteredReports.length === 0 ? (
                       <tr>
-                        <td colSpan={9} className="py-12 text-center text-slate-500">
+                        <td colSpan={canBulkDelete ? 10 : 9} className="py-12 text-center text-slate-500">
                           <FolderOpen className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                           <p className="font-bold">No safety reports match your filters</p>
                           <p className="text-[11px] text-slate-400 mt-1">Try adjusting the search criteria or status filter.</p>
@@ -1456,9 +1557,21 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                           key={report.reportId}
                           onClick={() => setSelectedReport(report)}
                           className={`hover:bg-emerald-50/40 cursor-pointer transition-colors ${
-                            isOpenUrgent(report) ? 'bg-rose-50/30' : ''
+                            selectedIds.has(report.reportId) ? 'bg-rose-50/60' : isOpenUrgent(report) ? 'bg-rose-50/30' : ''
                           }`}
                         >
+                          {canBulkDelete && (
+                            <td className="py-3.5 pl-4 pr-0" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.has(report.reportId)}
+                                onChange={() => toggleSelected(report.reportId)}
+                                disabled={bulkStatus?.kind === 'busy'}
+                                aria-label={`Select ${report.reportId}`}
+                                className="w-4 h-4 accent-[#DE2010] cursor-pointer"
+                              />
+                            </td>
+                          )}
                           <td className="py-3.5 px-4 font-mono font-black text-slate-900">
                             {report.reportId}
                           </td>
