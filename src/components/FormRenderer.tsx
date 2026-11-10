@@ -193,7 +193,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         reporting
       );
 
-      const result = await submitSafetyReport(form, reportId, payloadData, evidenceFiles);
+      const result = await submitSafetyReport(form, reportId, payloadData, evidenceFiles, receiptEmail);
 
       if (result.success) {
         const email = receiptEmail.trim();
@@ -809,7 +809,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
             <p className="text-xs text-slate-500">
               {reporting === 'Anonymous'
                 ? 'Your report stays anonymous: the address is only used to send you the case number and is not saved with the report.'
-                : 'We send you the case number for your records. The address is not saved with the report.'}
+                : 'We send you the case number for your records. The address is kept with your details so QSA can contact you about this report; only QSA managers can see it.'}
             </p>
           </div>
 
