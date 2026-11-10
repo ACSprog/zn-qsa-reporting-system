@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Home, ChevronRight } from 'lucide-react';
 import { FormType, ReportingType } from '../types';
 import { FORMS_META } from '../config/fields';
@@ -17,6 +17,12 @@ export const FormPage: React.FC<FormPageProps> = ({ form, onGoHome, onSelectForm
   const [submittedReportId, setSubmittedReportId] = useState<string | null>(null);
   const [submittedReporting, setSubmittedReporting] = useState<ReportingType>('Named');
   const [receipt, setReceipt] = useState<CaseReceipt | undefined>(undefined);
+
+  // Switching to another form (top menu) always starts over: no confirmation screen left over
+  useEffect(() => {
+    setSubmittedReportId(null);
+    setReceipt(undefined);
+  }, [form]);
 
   const handleSuccess = (reportId: string, reporting: ReportingType, emailReceipt?: CaseReceipt) => {
     setSubmittedReportId(reportId);
@@ -68,7 +74,9 @@ export const FormPage: React.FC<FormPageProps> = ({ form, onGoHome, onSelectForm
       </div>
 
       {/* Render Form */}
+      {/* key: a different form gets a brand-new FormRenderer (new case number, empty answers) */}
       <FormRenderer
+        key={form}
         form={form}
         onSuccess={handleSuccess}
         onCancel={onGoHome}

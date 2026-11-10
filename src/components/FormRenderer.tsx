@@ -158,6 +158,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
+    // Safety net: the case number must carry this form's prefix (HAZ-, IA-, SC-)
+    const caseId = reportId.startsWith(`${FORMS_META[form].prefix}-`) ? reportId : generateReportId(form);
 
     // Bot trap check: if honeypot filled, silently pretend success.
     // Logged so a real user hit by browser autofill can be diagnosed from the console.
@@ -193,14 +195,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         reporting
       );
 
-      const result = await submitSafetyReport(form, reportId, payloadData, evidenceFiles, receiptEmail);
+      const result = await submitSafetyReport(form, caseId, payloadData, evidenceFiles, receiptEmail);
 
       if (result.success) {
         const email = receiptEmail.trim();
         const receipt: CaseReceipt | undefined = email
-          ? { email, sent: sendCaseReceipt(email, reportId, form, reporting) }
+          ? { email, sent: sendCaseReceipt(email, caseId, form, reporting) }
           : undefined;
-        onSuccess(reportId, reporting, receipt);
+        onSuccess(caseId, reporting, receipt);
       } else {
         setSubmitError(result.error || 'Failed to submit report. Please try again.');
         setIsSubmitting(false);
