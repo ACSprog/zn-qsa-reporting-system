@@ -16,9 +16,6 @@ export const COMMON_EXCEL_HEADERS: HeaderMapping[] = [
   { header: 'Date of Event / Observation', fieldKey: 'eventDate' },
   { header: 'Time (if known)', fieldKey: 'eventTime' },
   { header: 'Location / Station', fieldKey: 'location' },
-  { header: 'Flight No. (if applicable)', fieldKey: 'flightNo' },
-  { header: 'Aircraft Registration (if applicable)', fieldKey: 'aircraftReg' },
-  { header: 'Aircraft Type (if applicable)', fieldKey: 'aircraftType' },
   { header: 'Does it require urgent attention?', fieldKey: 'urgent' },
   { header: 'Is anyone currently exposed to immediate risk?', fieldKey: 'exposedToRisk' },
   { header: 'Did you notify anyone at the time?', fieldKey: 'notified' },
@@ -26,13 +23,11 @@ export const COMMON_EXCEL_HEADERS: HeaderMapping[] = [
 ];
 
 export const HAZARD_EXCEL_HEADERS: HeaderMapping[] = [
-  { header: 'Hazard Group', fieldKey: 'hazardGroup' },
   { header: 'Hazard Category', fieldKey: 'hazardCategory' },
   { header: 'Where was the hazard identified?', fieldKey: 'whereIdentified' },
   { header: 'What is the hazard?', fieldKey: 'whatIsHazard' },
   { header: 'What could happen if it is not controlled?', fieldKey: 'whatCouldHappen' },
   { header: 'Who / what could be affected?', fieldKey: 'whoAffected' },
-  { header: 'Existing control or safeguard (if known)', fieldKey: 'existingControl' },
   { header: 'Action you took immediately (if any)', fieldKey: 'immediateAction' },
   { header: 'Supporting evidence / attachment reference', fieldKey: 'evidence' }
 ];
@@ -122,6 +117,28 @@ export function getExcelHeadersForForm(form: FormType): HeaderMapping[] {
       break;
   }
   return [...COMMON_EXCEL_HEADERS, ...specific, ...EVIDENCE_TAIL_HEADERS];
+}
+
+/** Excel table (in "Safety Reports.xlsx") that each form's cases go into */
+export const EXCEL_TABLE_FOR_FORM: Record<FormType, string> = {
+  hazard: 'tblHazard',
+  occurrence: 'tblOccurrence',
+  concern: 'tblConcern',
+  incident: 'tblIncident',
+  accident: 'tblAccident'
+};
+
+/**
+ * One case as an Excel row: { "<column header>": "<value>" } for every column of the form's
+ * table. Sent to Power Automate so a single "Add a row into a table" step works for all forms.
+ */
+export function buildExcelRow(form: FormType, data: Record<string, any>): Record<string, string> {
+  const row: Record<string, string> = {};
+  for (const { header, fieldKey } of getExcelHeadersForForm(form)) {
+    const v = data[fieldKey];
+    row[header] = v === undefined || v === null ? '' : Array.isArray(v) ? v.join(', ') : String(v);
+  }
+  return row;
 }
 
 /**

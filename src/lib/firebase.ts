@@ -51,6 +51,7 @@ import {
   ALL_REPORT_FORMS
 } from '../types';
 import { stripIdentityIfAnonymous, getCategoryForForm } from './idGenerator';
+import { EXCEL_TABLE_FOR_FORM, buildExcelRow } from '../config/excelMapping';
 
 /**
  * Local development against the Firebase Emulator Suite (npm run emulators).
@@ -423,11 +424,18 @@ export function dispatchPowerAutomateFlow(
     }))
   };
 
+  // Ready-made Excel row (column header -> value) so one "Add a row" step serves every form
+  const excelPayload = {
+    ...payload,
+    excelTable: EXCEL_TABLE_FOR_FORM[form],
+    excelRow: buildExcelRow(form, payload)
+  };
+
   fetch(flowUrl, {
     method: 'POST',
     mode: 'no-cors',
     headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(excelPayload)
   }).catch(() => {
     // Non-blocking fire and forget as mandated in spec
   });
