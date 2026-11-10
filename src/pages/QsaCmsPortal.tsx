@@ -1468,6 +1468,57 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                     )}
                   </div>
                 </div>
+
+                {/* Report type + date range (type stays in step with the tabs above) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+                  <label className="space-y-1 text-xs">
+                    <span className="font-bold text-slate-600 block">Report type</span>
+                    <select
+                      value={selectedCategoryTab}
+                      onChange={(e) => setSelectedCategoryTab(e.target.value as any)}
+                      className="w-full py-1.5 px-3 text-xs rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-[#1B8E44] font-medium"
+                    >
+                      <option value="all">All types</option>
+                      <option value="hazard">Hazard</option>
+                      <option value="occurrence">Accident / Incident</option>
+                      <option value="concern">Safety Concern</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs">
+                    <span className="font-bold text-slate-600 block">Reported from</span>
+                    <input
+                      type="date"
+                      value={startDate}
+                      max={endDate || undefined}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="w-full py-1.5 px-3 text-xs rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-[#1B8E44]"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs">
+                    <span className="font-bold text-slate-600 block">Reported to</span>
+                    <input
+                      type="date"
+                      value={endDate}
+                      min={startDate || undefined}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="w-full py-1.5 px-3 text-xs rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-[#1B8E44]"
+                    />
+                  </label>
+                  <div>
+                    {(startDate || endDate) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStartDate('');
+                          setEndDate('');
+                        }}
+                        className="text-xs font-semibold text-slate-600 hover:text-slate-900 underline py-1.5"
+                      >
+                        Clear dates
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Super Admin: bulk delete bar */}
