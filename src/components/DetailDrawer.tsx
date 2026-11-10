@@ -174,7 +174,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
 
   const handleSyncToExcel = async () => {
     const confirmed = window.confirm(
-      `Re-send ${report.reportId} to Excel and SharePoint?\n\nIf the Excel row already exists, nothing is duplicated. No email is sent.`
+      `Re-send ${report.reportId} to Excel and SharePoint?\n\nIf this case is already in Excel it gets a second row, so only do this when its row is missing.`
     );
     if (!confirmed) return;
     setIsSyncing(true);
@@ -777,7 +777,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
         <div className="px-4 py-3 border-t border-slate-200 bg-white shrink-0 flex items-center justify-between gap-3">
           <p className="text-[11px] text-slate-500 leading-snug">
             {syncMessage ??
-              'Re-send this report to Excel and SharePoint if its row or files were deleted. No email is sent.'}
+              'Re-send this report to Excel and SharePoint if its row or files are missing. For many cases, use the SharePoint & Excel Sync page.'}
           </p>
           <button
             type="button"
