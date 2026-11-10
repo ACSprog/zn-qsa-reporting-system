@@ -579,6 +579,16 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
                   <span className="text-slate-400 block">Contact:</span>
                   <span className="font-semibold text-slate-800">{identity.contact || '—'}</span>
                 </div>
+                <div className="col-span-2">
+                  <span className="text-slate-400 block">Email for updates:</span>
+                  {identity.email ? (
+                    <a href={`mailto:${identity.email}?subject=${encodeURIComponent(`Your safety report ${report.reportId}`)}`} className="font-semibold text-[#1B8E44] hover:underline break-all">
+                      {identity.email}
+                    </a>
+                  ) : (
+                    <span className="font-semibold text-slate-800">—</span>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="text-xs text-slate-500">No identity document on file.</div>

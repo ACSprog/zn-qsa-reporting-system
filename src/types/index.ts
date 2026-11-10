@@ -76,6 +76,8 @@ export interface ReporterIdentity {
   department: string;
   position: string;
   contact: string;
+  /** Open / Confidential only: address the reporter gave to receive their case number */
+  email?: string;
   reporting: ReportingType;
   reportId: string;
   createdAt?: any;

@@ -244,7 +244,9 @@ export async function submitSafetyReport(
   form: FormType,
   reportId: string,
   rawFormData: Record<string, any>,
-  evidenceFiles: ProcessedEvidenceFile[]
+  evidenceFiles: ProcessedEvidenceFile[],
+  /** "Email me my case number" address: kept with the identity for Open / Confidential only */
+  receiptEmail: string = ''
 ): Promise<{ success: boolean; reportId: string; error?: string }> {
   const reporting = rawFormData.reporting || 'Named';
   const cleanData = stripIdentityIfAnonymous(rawFormData, reporting);
@@ -264,6 +266,8 @@ export async function submitSafetyReport(
     position: cleanData.position || '',
     contact: cleanData.contact || ''
   };
+  const cleanReceiptEmail = receiptEmail.trim().toLowerCase().slice(0, 254);
+  if (reporting !== 'Anonymous' && cleanReceiptEmail) identityData.email = cleanReceiptEmail;
 
   // Build report document (excluding identity fields)
   const reportDocData: Record<string, any> = {
