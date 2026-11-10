@@ -1,4 +1,5 @@
 import { BaseReportData } from '../types';
+import { effectiveForm } from './display';
 import {
   dispatchPowerAutomateFlow,
   fetchReportEvidence,
@@ -56,10 +57,21 @@ export async function restoreReportToExcel(report: BaseReportData): Promise<Rest
     // Leave out Firestore-only fields
     const { createdAt, status, notes, deleted, ...reportFields } = report;
 
+    // A case moved to another type goes to that type's existing Excel table (case number kept).
+    // Its main description is copied into the new type's description column so it isn't blank.
+    const target = effectiveForm(report);
+    const fields: Record<string, any> = { ...reportFields };
+    if (target !== report.form) {
+      const description = fields.whatIsHazard || fields.whatHappened || fields.whatIsConcern || fields.description || '';
+      if (target === 'hazard') fields.whatIsHazard = fields.whatIsHazard || description;
+      if (target === 'occurrence') fields.whatHappened = fields.whatHappened || description;
+      if (target === 'concern') fields.whatIsConcern = fields.whatIsConcern || description;
+    }
+
     const sent = dispatchPowerAutomateFlow(
-      report.form,
+      target,
       report.reportId,
-      { ...reportFields, ...identity },
+      { ...fields, ...identity },
       report.category || '',
       expected,
       report.evidenceFolder || '',
@@ -70,7 +82,7 @@ export async function restoreReportToExcel(report: BaseReportData): Promise<Rest
     if (!sent) {
       return {
         ok: false,
-        message: `No Power Automate URL is configured for this form (VITE_FLOW_URL_${report.form.toUpperCase()}).`
+        message: `No Power Automate URL is configured for this form (VITE_FLOW_URL_${target.toUpperCase()}).`
       };
     }
 
