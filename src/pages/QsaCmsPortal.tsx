@@ -1641,8 +1641,15 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                               title={report.reclassifiedTo ? `Moved from ${FORMS_META[report.form].title}` : undefined}
                             >
                               {occurrenceKind(report) || FORMS_META[effectiveForm(report)].prefix}
-                              {report.reclassifiedTo ? ' *' : ''}
                             </span>
+                            {report.reclassifiedTo && report.reclassifiedTo !== report.form && (
+                              <span
+                                className="block mt-1 w-max text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 whitespace-nowrap"
+                                title={`Submitted as ${FORMS_META[report.form].title}, moved to ${FORMS_META[effectiveForm(report)].title}. The case number was kept.`}
+                              >
+                                Moved {FORMS_META[report.form].prefix} → {FORMS_META[effectiveForm(report)].prefix}
+                              </span>
+                            )}
                           </td>
                           <td className="py-3.5 px-4">
                             <span

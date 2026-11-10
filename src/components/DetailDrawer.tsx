@@ -173,8 +173,13 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
   };
 
   const handleSyncToExcel = async () => {
+    const moved = report.reclassifiedTo && report.reclassifiedTo !== report.form;
     const confirmed = window.confirm(
-      `Re-send ${report.reportId} to Excel and SharePoint?\n\nIf this case is already in Excel it gets a second row, so only do this when its row is missing.`
+      `Re-send ${report.reportId} to Excel and SharePoint?\n\n` +
+        (moved
+          ? `This case was moved, so it goes to the ${FORMS_META[effectiveForm(report)].title} sheet. Delete its old row from the ${FORMS_META[report.form].title} sheet by hand.\n\n`
+          : '') +
+        'If this case is already on that sheet it gets a second row, so only do this when its row is missing.'
     );
     if (!confirmed) return;
     setIsSyncing(true);

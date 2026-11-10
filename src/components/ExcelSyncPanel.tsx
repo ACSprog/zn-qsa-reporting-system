@@ -3,6 +3,7 @@ import { FileSpreadsheet, RefreshCw, Loader2, Square, CheckCircle2, AlertTriangl
 import { BaseReportData, CmsRole, FormType } from '../types';
 import { reportGroup } from '../lib/display';
 import { restoreReportToExcel } from '../lib/restoreToExcel';
+import { FORMS_META } from '../config/fields';
 
 type GroupFilter = 'all' | 'hazard' | 'occurrence' | 'concern';
 
@@ -248,7 +249,14 @@ export default function ExcelSyncPanel({ reports, role }: Props) {
                           {r.reportId}
                           {res && (res.ok ? <CheckCircle2 className="inline w-3.5 h-3.5 ml-1.5 text-emerald-600" /> : <AlertTriangle className="inline w-3.5 h-3.5 ml-1.5 text-rose-600" />)}
                         </td>
-                        <td className="py-2 px-3">{GROUP_LABEL[reportGroup(r) as Exclude<GroupFilter, 'all'>] || r.form}</td>
+                        <td className="py-2 px-3">
+                          {GROUP_LABEL[reportGroup(r) as Exclude<GroupFilter, 'all'>] || r.form}
+                          {r.reclassifiedTo && r.reclassifiedTo !== r.form && (
+                            <span className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 whitespace-nowrap">
+                              Moved {FORMS_META[r.form].prefix} → {FORMS_META[r.reclassifiedTo].prefix}
+                            </span>
+                          )}
+                        </td>
                         <td className="py-2 px-3 font-mono text-slate-600">{r.dateReported || '-'}</td>
                         <td className="py-2 px-3 max-w-[200px] truncate" title={r.location}>{r.location || '-'}</td>
                         <td className="py-2 px-3">{r.deleted ? 'Archived' : r.status}</td>
