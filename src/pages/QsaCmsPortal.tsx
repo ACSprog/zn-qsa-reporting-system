@@ -33,6 +33,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { confirmAndDeleteCase, confirmAndBulkDelete } from '../lib/caseDeletion';
+import { restoreReportToExcel } from '../lib/restoreToExcel';
 import {
   BaseReportData,
   CmsRole,
@@ -506,6 +507,8 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
 
   // Super Admin bulk delete: ticked cases (only ones still visible with the current filters)
   const canBulkDelete = role === 'superadmin';
+  // Ticking cases: Officers and up (bulk Sync to Excel); bulk delete stays Super Admin only
+  const canSelectCases = role === 'officer' || role === 'manager' || role === 'superadmin';
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState<{ kind: 'busy' | 'ok' | 'error'; text: string } | null>(null);
   const visibleIds = useMemo(() => new Set(filteredReports.map((r) => r.reportId)), [filteredReports]);
@@ -525,6 +528,34 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   const allVisibleSelected = filteredReports.length > 0 && filteredReports.every((r) => selectedIds.has(r.reportId));
   const toggleSelectAll = () =>
     setSelectedIds(allVisibleSelected ? new Set() : new Set(filteredReports.map((r) => r.reportId)));
+  const handleBulkSync = async () => {
+    const chosen = filteredReports.filter((r) => selectedIds.has(r.reportId));
+    if (chosen.length === 0) return;
+    if (
+      !window.confirm(
+        `Send ${chosen.length} case${chosen.length === 1 ? '' : 's'} to Excel / SharePoint again?\n\nUse this for cases whose Excel row is missing. No email is sent.`
+      )
+    )
+      return;
+    const failed: string[] = [];
+    for (let i = 0; i < chosen.length; i++) {
+      setBulkStatus({ kind: 'busy', text: `Sending ${i + 1} of ${chosen.length} to Excel…` });
+      const res = await restoreReportToExcel(chosen[i]);
+      if (!res.ok) failed.push(`${chosen[i].reportId}: ${res.message}`);
+      // Space the messages out a little so Power Automate isn't flooded
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    setBulkStatus(
+      failed.length === 0
+        ? {
+            kind: 'ok',
+            text: `${chosen.length} case${chosen.length === 1 ? '' : 's'} sent to Excel. Rows appear within a few minutes (check the flow's run history if one is missing).`
+          }
+        : { kind: 'error', text: `${chosen.length - failed.length} sent, ${failed.length} not sent. ${failed[0]}` }
+    );
+    if (failed.length === 0) setSelectedIds(new Set());
+  };
+
   const handleBulkDelete = async () => {
     if (!currentUser) return;
     const chosen = filteredReports.filter((r) => selectedIds.has(r.reportId));
@@ -1469,12 +1500,12 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                 </div>
               </div>
 
-              {/* Super Admin: bulk delete bar */}
-              {canBulkDelete && (selectedIds.size > 0 || bulkStatus) && (
-                <div className="px-4 py-2.5 border-b border-rose-200 bg-rose-50 flex flex-wrap items-center gap-3 text-xs">
+              {/* Bulk actions bar: Sync to Excel (Officers and up), delete (Super Admins) */}
+              {canSelectCases && (selectedIds.size > 0 || bulkStatus) && (
+                <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center gap-3 text-xs">
                   {selectedIds.size > 0 && (
                     <>
-                      <span className="font-bold text-rose-900">
+                      <span className="font-bold text-slate-800">
                         {selectedIds.size} case{selectedIds.size === 1 ? '' : 's'} selected
                       </span>
                       <button
@@ -1487,13 +1518,24 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                       </button>
                       <button
                         type="button"
+                        onClick={handleBulkSync}
+                        disabled={bulkStatus?.kind === 'busy'}
+                        className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-600 bg-white text-emerald-700 hover:bg-emerald-50 font-bold disabled:opacity-50"
+                      >
+                        {bulkStatus?.kind === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                        Sync selected to Excel ({selectedIds.size})
+                      </button>
+                      {canBulkDelete && (
+                      <button
+                        type="button"
                         onClick={handleBulkDelete}
                         disabled={bulkStatus?.kind === 'busy'}
-                        className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#DE2010] hover:bg-[#b81a0d] text-white font-bold disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#DE2010] hover:bg-[#b81a0d] text-white font-bold disabled:opacity-50"
                       >
                         {bulkStatus?.kind === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                         Delete selected permanently ({selectedIds.size})
                       </button>
+                      )}
                     </>
                   )}
                   {bulkStatus && (
@@ -1518,7 +1560,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-100/80 text-slate-700 font-extrabold uppercase tracking-wider border-b border-slate-200">
                     <tr>
-                      {canBulkDelete && (
+                      {canSelectCases && (
                         <th className="py-3 pl-4 pr-0 w-8">
                           <input
                             type="checkbox"
@@ -1545,7 +1587,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                   <tbody className="divide-y divide-slate-200 font-medium">
                     {filteredReports.length === 0 ? (
                       <tr>
-                        <td colSpan={canBulkDelete ? 10 : 9} className="py-12 text-center text-slate-500">
+                        <td colSpan={canSelectCases ? 10 : 9} className="py-12 text-center text-slate-500">
                           <FolderOpen className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                           <p className="font-bold">No safety reports match your filters</p>
                           <p className="text-[11px] text-slate-400 mt-1">Try adjusting the search criteria or status filter.</p>
@@ -1557,10 +1599,10 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                           key={report.reportId}
                           onClick={() => setSelectedReport(report)}
                           className={`hover:bg-emerald-50/40 cursor-pointer transition-colors ${
-                            selectedIds.has(report.reportId) ? 'bg-rose-50/60' : isOpenUrgent(report) ? 'bg-rose-50/30' : ''
+                            selectedIds.has(report.reportId) ? 'bg-emerald-50/60' : isOpenUrgent(report) ? 'bg-rose-50/30' : ''
                           }`}
                         >
-                          {canBulkDelete && (
+                          {canSelectCases && (
                             <td className="py-3.5 pl-4 pr-0" onClick={(e) => e.stopPropagation()}>
                               <input
                                 type="checkbox"
