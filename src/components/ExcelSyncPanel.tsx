@@ -45,8 +45,8 @@ export default function ExcelSyncPanel({ reports, role }: Props) {
         .filter((r) => (includeArchived ? true : !r.deleted))
         .filter((r) => group === 'all' || reportGroup(r) === (group as FormType))
         .filter((r) => !from || (r.dateReported || '') >= from)
-        .filter((r) => !to || (r.dateReported || '') <= to)
-        .sort((a, b) => (a.dateReported || '').localeCompare(b.dateReported || '') || a.reportId.localeCompare(b.reportId)),
+        // Keep the Inbox order (newest first), so new cases of every type are at the top
+        .filter((r) => !to || (r.dateReported || '') <= to),
     [reports, group, from, to, includeArchived]
   );
 
