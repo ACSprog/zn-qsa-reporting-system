@@ -4,6 +4,22 @@ This document outlines the step-by-step setup for the Microsoft Power Automate H
 
 ---
 
+## 0. Quick setup (current design): one flow, ready-made Excel rows
+
+Every report message now carries two extra values so the Excel step needs no column mapping:
+
+- `excelTable`: `tblHazard`, `tblOccurrence` or `tblConcern`
+- `excelRow`: the case as `{ "<column header>": "<value>", ... }`, with exactly the headers of that table
+
+The workbook `Safety Reports.xlsx` (sheets Hazard, Accident-Incident, Concern) is generated from `src/config/excelMapping.ts`, so its headers always match `excelRow`. Removed form questions (Hazard Group, existing control, flight / aircraft fields) are not in it.
+
+In the flow, in the branch that handles **reports** (not `type = case-receipt`), add **Excel Online (Business): Add a row into a table**:
+- **Location / Document Library / File:** where `Safety Reports.xlsx` is stored
+- **Table:** *Enter custom value* → expression `outputs('Compose')?['excelTable']`
+- **Row:** expression `outputs('Compose')?['excelRow']`
+
+---
+
 ## 1. Overview & Architecture
 
 When a safety report is submitted from the web application:
