@@ -77,7 +77,7 @@ export const Footer: React.FC = () => {
         </div>
 
         {/* Copyright */}
-        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-emerald-200/60 gap-3">
+        <div className="pt-6 flex justify-center text-center text-xs text-emerald-200/60">
           <p>© {new Date().getFullYear()} Zambia Airways (2014) Limited. All rights reserved.</p>
 
         </div>

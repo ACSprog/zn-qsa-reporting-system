@@ -28,9 +28,6 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
         <div className="absolute -bottom-12 -left-12 w-96 h-96 bg-[#1B8E44]/15 rounded-full blur-3xl pointer-events-none" />
 
         <div className="max-w-5xl mx-auto text-center space-y-4 relative z-10">
-          <div className="flex justify-center mb-2">
-            <ZambiaAirwaysLogo variant="full" size="md" showSubtitle={false} />
-          </div>
 
 
           <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-white leading-tight">
