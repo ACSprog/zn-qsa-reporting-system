@@ -623,10 +623,9 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
     const underReview = reports.filter((r) => r.status === 'Under review' || r.status === 'Action required').length;
     const closedCount = reports.filter((r) => r.status === 'Closed').length;
     const hazards = reports.filter((r) => reportGroup(r) === 'hazard').length;
-    const incidents = reports.filter((r) => occurrenceKind(r) === 'Incident').length;
-    const accidents = reports.filter((r) => occurrenceKind(r) === 'Accident').length;
+    const accidentsIncidents = reports.filter((r) => reportGroup(r) === 'occurrence').length;
     const concerns = reports.filter((r) => reportGroup(r) === 'concern').length;
-    return { total, new: newCount, urgent: urgentCount, underReview, closed: closedCount, hazards, incidents, accidents, concerns };
+    return { total, new: newCount, urgent: urgentCount, underReview, closed: closedCount, hazards, accidentsIncidents, concerns };
   }, [reports]);
 
   // 1. Loading State
@@ -1287,7 +1286,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
               </div>
             )}
             {/* Quick Metrics Bar */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
                 <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Total</span>
                 <span className="text-2xl font-black text-slate-900 mt-0.5 block">{metrics.total}</span>
@@ -1309,13 +1308,8 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
               </div>
 
               <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
-                <span className="text-[11px] font-bold text-[#1E2522] uppercase tracking-wider block">Incidents</span>
-                <span className="text-2xl font-black text-[#1E2522] mt-0.5 block">{metrics.incidents}</span>
-              </div>
-
-              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
-                <span className="text-[11px] font-bold text-rose-600 uppercase tracking-wider block">Accidents</span>
-                <span className="text-2xl font-black text-rose-700 mt-0.5 block">{metrics.accidents}</span>
+                <span className="text-[11px] font-bold text-rose-600 uppercase tracking-wider block">Accidents / Incidents</span>
+                <span className="text-2xl font-black text-rose-700 mt-0.5 block">{metrics.accidentsIncidents}</span>
               </div>
 
               <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
@@ -1634,7 +1628,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                               className={`font-mono text-[10px] font-black uppercase px-2 py-0.5 rounded border ${
                                 occurrenceKind(report) === 'Accident'
                                   ? 'bg-[#DE2010] text-white border-[#DE2010]'
-                                  : occurrenceKind(report) === 'Incident'
+                                  : occurrenceKind(report) === 'Incident' || reportGroup(report) === 'occurrence'
                                     ? 'bg-[#1E2522] text-white border-[#1E2522]'
                                     : 'bg-slate-100 text-slate-700 border-slate-200'
                               }`}
@@ -1779,26 +1773,13 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
 
                   <div>
                     <div className="flex justify-between text-xs font-bold mb-1">
-                      <span>Incidents</span>
-                      <span>{metrics.incidents} ({metrics.total ? Math.round((metrics.incidents / metrics.total) * 100) : 0}%)</span>
-                    </div>
-                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                      <div
-                        className="bg-[#1E2522] h-full"
-                        style={{ width: `${metrics.total ? (metrics.incidents / metrics.total) * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between text-xs font-bold mb-1">
-                      <span>Accidents</span>
-                      <span>{metrics.accidents} ({metrics.total ? Math.round((metrics.accidents / metrics.total) * 100) : 0}%)</span>
+                      <span>Accidents / Incidents</span>
+                      <span>{metrics.accidentsIncidents} ({metrics.total ? Math.round((metrics.accidentsIncidents / metrics.total) * 100) : 0}%)</span>
                     </div>
                     <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
                       <div
                         className="bg-[#DE2010] h-full"
-                        style={{ width: `${metrics.total ? (metrics.accidents / metrics.total) * 100 : 0}%` }}
+                        style={{ width: `${metrics.total ? (metrics.accidentsIncidents / metrics.total) * 100 : 0}%` }}
                       />
                     </div>
                   </div>

@@ -47,7 +47,6 @@ export const INCIDENT_EXCEL_HEADERS: HeaderMapping[] = [
 
 /** Combined Incident / Accident form (sheet / table tblOccurrence) */
 export const OCCURRENCE_EXCEL_HEADERS: HeaderMapping[] = [
-  { header: 'Incident or Accident', fieldKey: 'occurrenceType' },
   { header: 'Category', fieldKey: 'incidentType' },
   { header: 'Briefly, what happened?', fieldKey: 'whatHappened' },
   { header: 'What was happening immediately before the event?', fieldKey: 'before' },
