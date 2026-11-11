@@ -351,7 +351,6 @@ export const OCCURRENCE_SPECIFIC_FIELDS: FieldDefinition[] = [
     required: true,
     section: 2,
     options: ['Incident', 'Accident'],
-    hint: 'Accident: someone was injured or killed, or there was significant damage. Not sure? Choose Incident; QSA will classify it.'
   },
   {
     key: 'incidentType',

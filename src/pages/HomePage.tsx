@@ -32,10 +32,6 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
             <ZambiaAirwaysLogo variant="full" size="md" showSubtitle={false} />
           </div>
 
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#1b8e44]/30 border border-[#F37C1C]/40 text-emerald-200 text-xs font-bold tracking-wide">
-            <ShieldCheck className="w-4 h-4 text-[#F37C1C]" />
-            Official Zambia Airways (2014) Limited Safety Portal
-          </div>
 
           <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-white leading-tight">
             Safety Reporting System
@@ -43,7 +39,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
 
           <p className="text-sm sm:text-base text-emerald-100/90 max-w-3xl mx-auto leading-relaxed">
             Report any hazard, operational incident, accident, or safety concern.
-            Every submission is reviewed by Quality, Safety & Airworthiness (QSA) to safeguard our passengers, flight crew, ground personnel, and aircraft.
+            Every submission is reviewed by Quality & Safety Assurance (QSA) to safeguard our passengers, flight crew, ground personnel, and aircraft.
           </p>
 
           {/* Core Guarantees Banner */}
@@ -222,10 +218,11 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectForm }) => {
           <AlertTriangle className="w-6 h-6 text-[#F37C1C] shrink-0 mt-0.5" />
           <div className="text-xs sm:text-sm text-slate-700 space-y-1">
             <h4 className="font-bold text-slate-900">
-              Immediate Safety or Airworthiness Emergency?
+              Immediate Safety Emergency?
             </h4>
             <p>
-              If an aircraft, passenger, or employee is currently exposed to immediate imminent danger, notify Airport Operations / Air Traffic Control or call the 24/7 QSA Emergency Desk immediately in addition to submitting this report.
+              If an aircraft, passenger, or employee is exposed to immediate danger, notify Airport Operations / Air Traffic Control and call QSA on{' '}
+              <a href="tel:+260211431511" className="font-bold text-slate-900 underline">+260 211 431 511</a> straight away, in addition to submitting this report.
             </p>
           </div>
         </div>

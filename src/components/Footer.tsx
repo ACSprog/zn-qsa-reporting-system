@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, HeartHandshake, FileCheck, PhoneCall } from 'lucide-react';
+import { ShieldCheck, HeartHandshake, FileCheck, PhoneCall, Mail } from 'lucide-react';
 import { ZambiaAirwaysLogo } from './ZambiaAirwaysLogo';
 
 export const Footer: React.FC = () => {
@@ -49,14 +49,20 @@ export const Footer: React.FC = () => {
 
           <div>
             <span className="text-white font-bold text-sm block mb-1">
-              Quality, Safety & Airworthiness (QSA)
+              Quality & Safety Assurance (QSA)
             </span>
             <p className="leading-relaxed text-slate-300">
-              Direct all inquiries or confidential follow-ups regarding voluntary safety reports to the Safety Management Office.
+              For questions or updates on a safety report, contact the QSA department and quote your case number.
             </p>
-            <div className="flex items-center gap-1.5 mt-2.5 text-[#F37C1C] font-semibold">
-              <PhoneCall className="w-3.5 h-3.5" />
-              <span>QSA Emergency / Urgent Line: Ext. 2100 / Duty Officer</span>
+            <div className="mt-2.5 space-y-1 text-[#F37C1C] font-semibold">
+              <a href="tel:+260211431511" className="flex items-center gap-1.5 hover:underline">
+                <PhoneCall className="w-3.5 h-3.5" />
+                <span>+260 211 431 511</span>
+              </a>
+              <a href="mailto:qsa@zambiaairways.co.zm" className="flex items-center gap-1.5 hover:underline">
+                <Mail className="w-3.5 h-3.5" />
+                <span>qsa@zambiaairways.co.zm</span>
+              </a>
             </div>
           </div>
 
@@ -74,13 +80,6 @@ export const Footer: React.FC = () => {
         <div className="pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-emerald-200/60 gap-3">
           <p>© {new Date().getFullYear()} Zambia Airways (2014) Limited. All rights reserved.</p>
 
-          <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1 text-slate-300">
-              <FileCheck className="w-3.5 h-3.5 text-[#F37C1C]" /> Form Revision 3.2
-            </span>
-            <span>•</span>
-            <span className="text-[#F37C1C] font-semibold">The Wings of the Nation</span>
-          </div>
         </div>
       </div>
     </footer>
