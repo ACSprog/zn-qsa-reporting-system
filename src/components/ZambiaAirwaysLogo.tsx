@@ -61,7 +61,7 @@ export const ZambiaAirwaysLogo: React.FC<ZambiaAirwaysLogoProps> = ({
         <div className="hidden lg:flex flex-col border-l border-emerald-400/30 pl-3 leading-tight">
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-black text-white tracking-wider uppercase">
-              Quality, Safety & Airworthiness
+              Quality & Safety Assurance
             </span>
             <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-[#F37C1C] text-slate-950">
               QSA

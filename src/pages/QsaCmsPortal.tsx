@@ -966,7 +966,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
         )}
 
         <div className="text-center text-xs text-emerald-200/50">
-          Zambia Airways (2014) Limited • Quality, Safety & Airworthiness (QSA) Management Console
+          Zambia Airways (2014) Limited • Quality & Safety Assurance (QSA) Management Console
         </div>
       </div>
     );
@@ -1901,9 +1901,9 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                 </div>
 
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Emergency Safety Desk</span>
-                  <div className="font-extrabold text-slate-900">KKIA Airport Operations</div>
-                  <div className="text-slate-500">Ext. 2100 / Duty Safety Desk</div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">QSA Department</span>
+                  <div className="font-extrabold text-slate-900">+260 211 431 511</div>
+                  <div className="text-slate-500">qsa@zambiaairways.co.zm</div>
                 </div>
 
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
