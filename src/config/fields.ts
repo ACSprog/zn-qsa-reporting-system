@@ -348,9 +348,11 @@ export const OCCURRENCE_SPECIFIC_FIELDS: FieldDefinition[] = [
     key: 'occurrenceType',
     label: 'Was this an incident or an accident?',
     type: 'radio',
-    required: true,
+    required: false,
     section: 2,
     options: ['Incident', 'Accident'],
+    // No longer asked: shown in the CMS only for older reports that have it
+    retired: true
   },
   {
     key: 'incidentType',

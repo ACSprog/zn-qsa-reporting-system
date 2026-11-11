@@ -54,11 +54,17 @@ export function reportGroup(r: Pick<BaseReportData, 'form' | 'reclassifiedTo'>):
   return formGroup(effectiveForm(r));
 }
 
-/** For Incident / Accident cases: which of the two it is. */
+/**
+ * For Incident / Accident cases: which of the two it is, when known. The combined form no
+ * longer asks, so new cases return null (shown as "IA"); older ones keep their answer.
+ */
 export function occurrenceKind(r: BaseReportData): 'Incident' | 'Accident' | null {
   const form = effectiveForm(r);
   if (form === 'accident') return 'Accident';
   if (form === 'incident') return 'Incident';
-  if (form === 'occurrence') return (r as any).occurrenceType === 'Accident' ? 'Accident' : 'Incident';
+  if (form === 'occurrence') {
+    const t = (r as any).occurrenceType;
+    return t === 'Accident' ? 'Accident' : t === 'Incident' ? 'Incident' : null;
+  }
   return null;
 }
