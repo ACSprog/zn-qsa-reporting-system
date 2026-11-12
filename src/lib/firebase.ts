@@ -593,6 +593,9 @@ export async function permanentlyDeleteReport(
   }
 }
 
+/** Why the last updateReportMetadata call failed (Firestore error code), for on-screen messages. */
+export let lastReportUpdateError: string | null = null;
+
 export async function updateReportMetadata(
   form: FormType,
   reportId: string,
@@ -613,8 +616,9 @@ export async function updateReportMetadata(
       for (const [k, v] of Object.entries(firestoreUpdates)) if (v === null) firestoreUpdates[k] = deleteField();
       await updateDoc(ref, firestoreUpdates);
       return true;
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to update report metadata:', e);
+      lastReportUpdateError = e?.code || e?.message || 'unknown error';
       return false;
     }
   } else {

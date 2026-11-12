@@ -217,10 +217,10 @@ const EnrollFlow: React.FC<FlowProps> = ({ onEnrolled }) => {
           <input
             inputMode="numeric"
             autoComplete="one-time-code"
-            maxLength={7}
+            maxLength={6}
             disabled={!secret}
             value={code}
-            onChange={(e) => setCode(e.target.value)}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             placeholder="123456"
             className="w-36 px-3 py-2 rounded-lg border border-slate-300 font-mono text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-[#1B8E44]/40"
           />
