@@ -272,10 +272,10 @@ export const AuthActionPage: React.FC<Props> = ({ onGoToCms, onGoHome }) => {
             inputMode="numeric"
             autoComplete="one-time-code"
             autoFocus
-            maxLength={7}
+            maxLength={6}
             value={mfaCode}
-            onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9 ]/g, ''))}
-            placeholder="123 456"
+            onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="123456"
             className="w-full text-center tracking-[0.5em] font-mono text-2xl py-3 rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#1B8E44]/40 focus:border-[#1B8E44]"
           />
           {errorBox(formError)}

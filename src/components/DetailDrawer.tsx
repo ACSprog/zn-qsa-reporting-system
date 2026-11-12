@@ -37,6 +37,7 @@ import {
   fetchReportEvidence,
   fetchReporterIdentity,
   updateReportMetadata,
+  lastReportUpdateError,
   requestReportDeletion,
   decideDeletionRequest,
   reclassifyReport
@@ -96,18 +97,23 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
   const [currentNotes, setCurrentNotes] = useState<string>('');
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const [previewImage, setPreviewImage] = useState<ProcessedEvidenceFile | null>(null);
 
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
+  // Reset the drawer only when a DIFFERENT case is opened. Live updates to the same case
+  // (someone else's change, or our own save) must not wipe what is being typed or the "Saved" tick.
+  const reportKey = report ? `${report.form}/${report.reportId}` : '';
   useEffect(() => {
     if (!report) return;
 
     setCurrentStatus(report.status || 'New');
     setCurrentNotes(report.notes || '');
     setSaveSuccess(false);
+    setSaveError(null);
     setSyncMessage(null);
     setShowDeleteForm(false);
     setDeleteReason('');
@@ -147,7 +153,8 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
         })
         .finally(() => setLoadingIdentity(false));
     }
-  }, [report, isQsaAdmin]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportKey, isQsaAdmin]);
 
   if (!report) return null;
 
@@ -157,15 +164,21 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
   const handleSaveStatusAndNotes = async () => {
     setIsSaving(true);
     setSaveSuccess(false);
+    setSaveError(null);
     try {
       const ok = await updateReportMetadata(report.form, report.reportId, {
         status: currentStatus,
-        notes: currentNotes
+        notes: currentNotes.trim()
       });
       if (ok) {
         setSaveSuccess(true);
-        onReportUpdated();
-        setTimeout(() => setSaveSuccess(false), 3000);
+        setTimeout(() => setSaveSuccess(false), 4000);
+      } else {
+        setSaveError(
+          lastReportUpdateError === 'permission-denied'
+            ? 'Not saved: permission denied. Your session may have expired or need the 2FA code. Sign out, sign in again and retry.'
+            : `Not saved (${lastReportUpdateError || 'unknown error'}). Check your connection and try again.`
+        );
       }
     } finally {
       setIsSaving(false);
@@ -515,7 +528,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
                   className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-50"
                 >
                   {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                  <span>Save Review Updates</span>
+                  <span>{saveSuccess ? 'Saved ✓' : 'Save Review Updates'}</span>
                 </button>
                 ) : (
                   <span className="text-[11px] text-slate-500 flex items-center gap-1.5 pb-2">
@@ -537,6 +550,11 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
                 placeholder="Enter investigation notes, assigned action items or safety board references..."
                 className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500"
               />
+              {saveError && (
+                <p className="mt-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5">
+                  {saveError}
+                </p>
+              )}
             </div>
           </div>
 

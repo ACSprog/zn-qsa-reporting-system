@@ -747,9 +747,9 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
                     autoFocus
                     inputMode="numeric"
                     autoComplete="one-time-code"
-                    maxLength={7}
+                    maxLength={6}
                     value={mfaCode}
-                    onChange={(e) => setMfaCode(e.target.value)}
+                    onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     placeholder="123456"
                     className="w-full px-4 py-3 rounded-xl border border-slate-300 font-mono text-xl tracking-[0.4em] text-center focus:outline-none focus:ring-2 focus:ring-[#1B8E44]/40"
                   />
