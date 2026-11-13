@@ -157,6 +157,24 @@ firebase deploy --only hosting,firestore:rules
 
 ---
 
+### Automatic deployment (GitHub Actions)
+
+`.github/workflows/deploy.yml` builds the site and publishes it to Firebase Hosting each time a
+pull request is merged into `main` (or when you press **Run workflow** under the repo's
+**Actions** tab). One-time setup:
+
+1. `firebase init hosting:github --project zn-qsa-reporting-system-test`: sign in to GitHub
+   when asked, enter `ACSprog/zn-qsa-reporting-system`, and answer **No** to the build-script
+   and merge-deploy questions. It creates a deploy service account and saves its key as a
+   repository secret named `FIREBASE_SERVICE_ACCOUNT_ZN_QSA_REPORTING_SYSTEM_TEST`. Delete any
+   `.github/workflows/firebase-hosting-*.yml` files it writes (don't commit them). If it asks to overwrite an existing file, answer **No**.
+2. On GitHub, **Settings -> Secrets and variables -> Actions -> New repository secret**: name
+   `ENV_LOCAL`, value = the whole of your `.env.local` file.
+
+Firestore rules are not deployed automatically: run `firebase deploy --only firestore:rules`
+when `firestore.rules` changes. At go-live, change `FIREBASE_PROJECT` and the service-account secret name
+in the workflow, and `ENV_LOCAL`, to the live project.
+
 ## 3. Firebase Setup (Spark Plan)
 
 1. Open the [Firebase Console](https://console.firebase.google.com/) and create a new project (e.g. `zambia-airways-safety`).

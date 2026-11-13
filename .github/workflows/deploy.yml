@@ -1,0 +1,59 @@
+# Builds the site and publishes it to Firebase Hosting every time something is merged into
+# main (or when started by hand from the Actions tab). Replaces running
+# "npm run build" + "firebase deploy --only hosting" on your computer.
+#
+# Needs two repository secrets (Settings -> Secrets and variables -> Actions):
+#   ENV_LOCAL                  the full contents of your .env.local file
+#   FIREBASE_SERVICE_ACCOUNT_ZN_QSA_REPORTING_SYSTEM_TEST
+#                              the key Firebase uses to deploy; created and saved for you
+#                              by "firebase init hosting:github" (see README)
+# Firestore rules are NOT deployed by this workflow; deploy those by hand when they change.
+name: Deploy to Firebase Hosting
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-hosting
+  cancel-in-progress: true
+
+env:
+  FIREBASE_PROJECT: zn-qsa-reporting-system-test
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Write .env.local from the ENV_LOCAL secret
+        env:
+          ENV_LOCAL: ${{ secrets.ENV_LOCAL }}
+        run: |
+          if [ -z "$ENV_LOCAL" ]; then
+            echo "::error::The ENV_LOCAL secret is missing. Without it the site would be built without Firebase settings."
+            exit 1
+          fi
+          printf '%s\n' "$ENV_LOCAL" > .env.local
+          grep -q '^VITE_FIREBASE_PROJECT_ID=' .env.local || { echo "::error::ENV_LOCAL has no VITE_FIREBASE_PROJECT_ID line"; exit 1; }
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to the live site
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ZN_QSA_REPORTING_SYSTEM_TEST }}
+          projectId: ${{ env.FIREBASE_PROJECT }}
+          channelId: live
