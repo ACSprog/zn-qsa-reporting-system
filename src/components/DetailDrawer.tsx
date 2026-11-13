@@ -21,7 +21,9 @@ import {
   Eye,
   RefreshCw,
   Trash2,
-  XCircle
+  XCircle,
+  History,
+  FileDown
 } from 'lucide-react';
 import {
   BaseReportData,
@@ -47,6 +49,9 @@ import { ACTIVE_FORMS, FormType } from '../types';
 import { triggerFileDownload } from '../lib/evidence';
 import { restoreReportToExcel } from '../lib/restoreToExcel';
 import { confirmAndDeleteCase } from '../lib/caseDeletion';
+import { AuditEntry, actionLabel, changeRows, describeChanges, fetchCaseHistory, formatAuditTime, logAudit } from '../lib/audit';
+import { openCasePack } from '../lib/casePack';
+import { ROLE_INFO } from '../lib/accounts';
 
 interface DetailDrawerProps {
   report: BaseReportData | null;
@@ -93,6 +98,12 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
   const [identityRestricted, setIdentityRestricted] = useState<boolean>(false);
   const [loadingIdentity, setLoadingIdentity] = useState<boolean>(false);
 
+  // Case history (audit trail): Managers and Super Admins
+  const [history, setHistory] = useState<AuditEntry[] | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [packBusy, setPackBusy] = useState(false);
+
   const [currentStatus, setCurrentStatus] = useState<ReportStatus>('New');
   const [currentNotes, setCurrentNotes] = useState<string>('');
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -114,6 +125,9 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
     setCurrentNotes(report.notes || '');
     setSaveSuccess(false);
     setSaveError(null);
+    setHistory(null);
+    setHistoryError(null);
+    setHistoryOpen(false);
     setSyncMessage(null);
     setShowDeleteForm(false);
     setDeleteReason('');
@@ -142,6 +156,9 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
       fetchReporterIdentity(report.reportId)
         .then((id) => {
           if (id) {
+            logAudit('case.identity-viewed', 'case', report.reportId, `Viewed the reporter identity of ${report.reportId} (${reportingLabel(report.reporting)})`, {
+              reportingMode: reportingLabel(report.reporting)
+            });
             setIdentity(id);
             setIdentityRestricted(false);
           } else {
@@ -166,10 +183,36 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
     setSaveSuccess(false);
     setSaveError(null);
     try {
-      const ok = await updateReportMetadata(report.form, report.reportId, {
-        status: currentStatus,
-        notes: currentNotes.trim()
-      });
+      const beforeStatus = report.status || 'New';
+      const beforeNotes = report.notes || '';
+      const afterNotes = currentNotes.trim();
+      if (beforeStatus === currentStatus && beforeNotes === afterNotes) {
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 4000);
+        return;
+      }
+      const details: Record<string, string> = {};
+      if (beforeStatus !== currentStatus) {
+        details.before_status = beforeStatus;
+        details.after_status = currentStatus;
+      }
+      if (beforeNotes !== afterNotes) {
+        details.before_notes = beforeNotes;
+        details.after_notes = afterNotes;
+      }
+      const ok = await updateReportMetadata(
+        report.form,
+        report.reportId,
+        { status: currentStatus, notes: afterNotes },
+        {
+          action: 'case.review',
+          summary:
+            beforeStatus !== currentStatus
+              ? `Status of ${report.reportId}: ${beforeStatus} → ${currentStatus}${beforeNotes !== afterNotes ? ' (notes edited)' : ''}`
+              : `Edited QSA notes on ${report.reportId}`,
+          details
+        }
+      );
       if (ok) {
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 4000);
@@ -240,9 +283,16 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
       )
     )
       return;
-    const ok = await updateReportMetadata(report.form, report.reportId, {
-      deleted: nextDeleted
-    });
+    const ok = await updateReportMetadata(
+      report.form,
+      report.reportId,
+      { deleted: nextDeleted },
+      {
+        action: nextDeleted ? 'case.archived' : 'case.restored',
+        summary: `${nextDeleted ? 'Archived' : 'Restored'} ${report.reportId}`,
+        details: { before_archived: report.deleted ? 'Yes' : 'No', after_archived: nextDeleted ? 'Yes' : 'No' }
+      }
+    );
     if (ok) {
       onReportUpdated();
       onClose();
@@ -308,6 +358,37 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
       }
     } finally {
       setDeletionBusy(false);
+    }
+  };
+
+  const loadHistory = async () => {
+    setHistoryError(null);
+    try {
+      setHistory(await fetchCaseHistory(report.reportId));
+    } catch (e: any) {
+      setHistoryError(
+        e?.code === 'permission-denied'
+          ? 'Permission denied: the latest security rules are not published yet.'
+          : e?.message || 'Could not load the history.'
+      );
+    }
+  };
+
+  const toggleHistory = () => {
+    const next = !historyOpen;
+    setHistoryOpen(next);
+    if (next) loadHistory();
+  };
+
+  const handleCasePack = async () => {
+    setPackBusy(true);
+    try {
+      await openCasePack(report, role ? ROLE_INFO[role]?.label || role : '');
+      if (historyOpen) loadHistory();
+    } catch (e: any) {
+      setHistoryError(e?.message || 'Could not build the audit pack.');
+    } finally {
+      setPackBusy(false);
     }
   };
 
@@ -557,6 +638,69 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
               )}
             </div>
           </div>
+
+          {/* Case history (audit trail) and audit pack: Managers and Super Admins */}
+          {isManager && (
+            <div className="border border-slate-200 rounded-xl p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <button type="button" onClick={toggleHistory} className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <History className="w-4 h-4 text-slate-500" />
+                  Case history (audit trail) {historyOpen ? '▾' : '▸'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCasePack}
+                  disabled={packBusy}
+                  className="px-3 py-1.5 rounded-lg bg-[#0d3b1f] hover:bg-[#164a27] text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+                  title="Everything about this case, ready to print or save as PDF for an auditor"
+                >
+                  {packBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
+                  Case audit pack (PDF)
+                </button>
+              </div>
+              {historyOpen && (
+                <div className="space-y-2">
+                  {historyError && <p className="text-xs text-rose-700">{historyError}</p>}
+                  {!history && !historyError && (
+                    <p className="text-xs text-slate-500 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</p>
+                  )}
+                  {history && (
+                    <ol className="relative border-l-2 border-emerald-200 ml-1.5 space-y-2.5">
+                      <li className="pl-3">
+                        <div className="text-[11px] text-slate-500">{report.createdAt ? formatAuditTime(typeof report.createdAt?.toDate === 'function' ? report.createdAt.toDate() : new Date(report.createdAt)) : ''}</div>
+                        <div className="text-xs font-semibold text-slate-800">Report submitted ({reportingLabel(report.reporting)})</div>
+                      </li>
+                      {history.map((e) => {
+                        const ch = describeChanges(e.details);
+                        return (
+                          <li key={e.id} className="pl-3">
+                            <div className="text-[11px] text-slate-500">
+                              {formatAuditTime(e.at)} · {e.actorEmail}
+                              {e.actorRole ? ` (${e.actorRole})` : ''}
+                              {e.outcome === 'failure' && <span className="ml-1.5 text-rose-700 font-bold">FAILED</span>}
+                            </div>
+                            <div className="text-xs font-semibold text-slate-800">{actionLabel(e.action)}</div>
+                            {changeRows(e.details).map((c) => (
+                              <div key={c.field} className="text-[11px] text-slate-600 whitespace-pre-wrap">
+                                <span className="font-semibold">{c.field}:</span>{' '}
+                                {c.before && <span className="text-rose-700/80 line-through decoration-rose-400/60">{c.before}</span>}
+                                {c.before && c.after && ' → '}
+                                <span className="text-emerald-800">{c.after}</span>
+                              </div>
+                            ))}
+                            {ch.other && <div className="text-[11px] text-slate-500 whitespace-pre-wrap">{ch.other}</div>}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  )}
+                  {history && history.length === 0 && (
+                    <p className="text-[11px] text-slate-500">No CMS actions recorded on this case yet (the audit trail records actions from its introduction onwards).</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Reporter Identity (Access Controlled) */}
           <div className="border border-slate-200 rounded-xl p-4 space-y-2">

@@ -30,10 +30,13 @@ import {
   X,
   Users,
   Home,
-  Trash2
+  Trash2,
+  ScrollText
 } from 'lucide-react';
 import { confirmAndDeleteCase, confirmAndBulkDelete } from '../lib/caseDeletion';
 import ExcelSyncPanel from '../components/ExcelSyncPanel';
+import AuditLogPanel from '../components/AuditLogPanel';
+import { logAudit, setAuditRole } from '../lib/audit';
 import {
   BaseReportData,
   CmsRole,
@@ -85,7 +88,7 @@ import { ZambiaAirwaysLogo } from '../components/ZambiaAirwaysLogo';
 
 const ISSUER_LABEL = 'Zambia Airways QSA';
 
-type CmsTab = 'inbox' | 'analytics' | 'sync' | 'accounts' | 'settings';
+type CmsTab = 'inbox' | 'analytics' | 'sync' | 'audit' | 'accounts' | 'settings';
 
 interface QsaCmsPortalProps {
   onNavigatePublicSite?: () => void;
@@ -263,6 +266,17 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   // Only once the session may read reports (2FA done if required); restarts with a clean slate
   // whenever that changes, so an old "permission denied" never lingers after signing in again.
   const canReadReports = isAdmin && !(require2fa && !session2fa);
+
+  // Audit trail: the user's level goes on every entry; a fresh sign-in is recorded once the
+  // session is fully allowed in (after the authenticator code if required)
+  useEffect(() => setAuditRole(role ? ROLE_INFO[role]?.label || role : ''), [role]);
+  const pendingSignInAudit = useRef<string | null>(null);
+  useEffect(() => {
+    if (!canReadReports || !pendingSignInAudit.current) return;
+    const method = pendingSignInAudit.current;
+    pendingSignInAudit.current = null;
+    logAudit('session.sign-in', 'session', currentUser?.email || '', `Signed in (${method})`, { method });
+  }, [canReadReports, currentUser]);
   useEffect(() => {
     setReportsError(null);
     if (!canReadReports) return;
@@ -306,7 +320,9 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
         setMfaCode('');
       } else if (res.error) {
         setAuthError(res.error);
+        logAudit('session.sign-in-failed', 'session', loginEmail.trim().toLowerCase(), `Failed sign-in for ${loginEmail.trim().toLowerCase()}`, { reason: res.error.slice(0, 200) }, { outcome: 'failure', attemptedEmail: loginEmail.trim().toLowerCase() });
       } else if (res.user) {
+        pendingSignInAudit.current = 'password';
         if (rememberMe) {
           localStorage.setItem('za_cms_remembered_email', loginEmail.trim());
         } else {
@@ -330,7 +346,9 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
       const res = await completeMfaSignIn(mfaResolver, mfaCode);
       if (res.error) {
         setAuthError(res.error);
+        logAudit('session.sign-in-failed', 'session', loginEmail.trim().toLowerCase(), `Wrong authenticator code for ${loginEmail.trim().toLowerCase()}`, { reason: res.error.slice(0, 200) }, { outcome: 'failure', attemptedEmail: loginEmail.trim().toLowerCase() });
       } else {
+        pendingSignInAudit.current = 'password + authenticator code';
         setMfaResolver(null);
         setMfaCode('');
         if (rememberMe) localStorage.setItem('za_cms_remembered_email', loginEmail.trim());
@@ -365,6 +383,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
   };
 
   const handleSignOut = async () => {
+    await logAudit('session.sign-out', 'session', currentUser?.email || '', 'Signed out');
     clearCmsActivity();
     setReportsError(null);
     await signOutUser();
@@ -608,6 +627,13 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
     } else {
       XLSX.writeFile(workbook, filename, { bookType: 'csv' });
     }
+    const withIdentity = isQsaAdmin && filteredReports.some((r) => r.reporting !== 'Anonymous');
+    logAudit('export.reports', 'export', filename, `Exported ${filteredReports.length} case(s) to ${format.toUpperCase()}${withIdentity ? ' including reporter identities' : ''}`, {
+      count: filteredReports.length,
+      format,
+      reporterIdentitiesIncluded: withIdentity,
+      caseNumbers: filteredReports.slice(0, 200).map((r) => r.reportId).join(', ')
+    });
   };
 
   // Metrics calculation
@@ -1064,6 +1090,20 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
               <span>SharePoint & Excel Sync</span>
             </button>
 
+            {role === 'superadmin' && (
+            <button
+              onClick={() => setActiveCmsTab('audit')}
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all ${
+                activeCmsTab === 'audit'
+                  ? 'bg-[#1B8E44] text-white shadow-sm'
+                  : 'text-emerald-100/80 hover:bg-[#123e20] hover:text-white'
+              }`}
+            >
+              <ScrollText className="w-4 h-4 text-[#F37C1C]" />
+              <span>Audit Log</span>
+            </button>
+            )}
+
             <button
               onClick={() => setActiveCmsTab('accounts')}
               className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all ${
@@ -1127,6 +1167,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
               {activeCmsTab === 'inbox' && 'Submissions Management'}
               {activeCmsTab === 'analytics' && 'Safety Analytics & Metrics'}
               {activeCmsTab === 'sync' && 'Excel & SharePoint Sync Engine'}
+              {activeCmsTab === 'audit' && 'Audit Log'}
               {activeCmsTab === 'accounts' && (isManager ? 'User Accounts' : 'My Account')}
               {activeCmsTab === 'settings' && 'CMS Policy Settings'}
             </span>
@@ -1838,6 +1879,7 @@ export const QsaCmsPortal: React.FC<QsaCmsPortalProps> = ({ onNavigatePublicSite
 
         {/* Tab 3: Excel & SharePoint Sync */}
         {activeCmsTab === 'sync' && <ExcelSyncPanel reports={reports} role={role} />}
+        {activeCmsTab === 'audit' && role === 'superadmin' && <AuditLogPanel reports={reports} />}
 
         {/* Tab 5: CMS Configuration */}
         {activeCmsTab === 'accounts' && (

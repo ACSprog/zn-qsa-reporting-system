@@ -33,8 +33,9 @@ import {
   deleteDoc,
   serverTimestamp
 } from 'firebase/firestore';
-import { getFirebaseHandles, usingEmulators, tempPasswordFingerprint, sendPasswordLinkEmail } from './firebase';
+import { getFirebaseHandles, usingEmulators, tempPasswordFingerprint, sendPasswordLinkEmail, currentActor } from './firebase';
 import { CmsRole, PendingAdminAction } from '../types';
+import { logAudit } from './audit';
 
 export const ROLE_INFO: Record<CmsRole, { label: string; description: string }> = {
   viewer: { label: 'Viewer', description: 'Can view reports only.' },
@@ -281,7 +282,7 @@ export async function listCmsAccounts(): Promise<CmsAccount[]> {
  * Adds a CMS user: creates their login with a temporary password (unless an existing UID
  * is given), grants the chosen level, and e-mails them their login details.
  */
-export async function addCmsAccount(input: AddAccountInput, invitedByEmail: string): Promise<AddAccountResult> {
+async function addCmsAccountImpl(input: AddAccountInput, invitedByEmail: string): Promise<AddAccountResult> {
   const email = input.email.trim().toLowerCase();
   const name = (input.name || '').trim();
   if (!email.includes('@')) throw new Error('Enter a valid email address.');
@@ -366,7 +367,7 @@ export async function addCmsAccount(input: AddAccountInput, invitedByEmail: stri
 }
 
 /** Change a user's privilege level. */
-export async function setAccountRole(account: CmsAccount, role: CmsRole): Promise<void> {
+async function setAccountRoleImpl(account: CmsAccount, role: CmsRole): Promise<void> {
   const { db } = getFirebaseHandles();
   if (!db) {
     const cur = previewAccounts.get(account.uid);
@@ -385,7 +386,7 @@ export async function setAccountRole(account: CmsAccount, role: CmsRole): Promis
 }
 
 /** Block (access stops immediately, user stays in the list) or unblock. */
-export async function setAccountBlocked(account: CmsAccount, blocked: boolean): Promise<void> {
+async function setAccountBlockedImpl(account: CmsAccount, blocked: boolean): Promise<void> {
   const { db } = getFirebaseHandles();
   if (!db) {
     const cur = previewAccounts.get(account.uid);
@@ -409,7 +410,7 @@ export async function setAccountBlocked(account: CmsAccount, blocked: boolean): 
 }
 
 /** Super Admin: start ('on') or stop ('off') two-step sign-in for one user. */
-export async function setAccountTwoFactor(account: CmsAccount, mode: 'on' | 'off'): Promise<void> {
+async function setAccountTwoFactorImpl(account: CmsAccount, mode: 'on' | 'off'): Promise<void> {
   const { db, firebaseConfig } = getFirebaseHandles();
   if (!db) {
     const cur = previewAccounts.get(account.uid);
@@ -442,7 +443,7 @@ export async function setAccountTwoFactor(account: CmsAccount, mode: 'on' | 'off
  * Removes all CMS access. The Firebase login itself remains (deleting logins needs a
  * server), but it can no longer open the CMS or read reports.
  */
-export async function removeCmsAccount(account: CmsAccount): Promise<void> {
+async function removeCmsAccountImpl(account: CmsAccount): Promise<void> {
   const { db } = getFirebaseHandles();
   if (!db) {
     previewAccounts.delete(account.uid);
@@ -462,7 +463,7 @@ export async function removeCmsAccount(account: CmsAccount): Promise<void> {
  * E-mails the user a link to choose a new password. Also unlocks the account if it was
  * locked after too many wrong passwords. Returns true if it was locked.
  */
-export async function sendAccountPasswordReset(email: string): Promise<boolean> {
+async function sendAccountPasswordResetImpl(email: string): Promise<boolean> {
   const { auth, db } = getFirebaseHandles();
   if (!auth) return false; // preview mode
   let wasLocked = false;
@@ -487,7 +488,7 @@ export async function sendAccountPasswordReset(email: string): Promise<boolean> 
 }
 
 /** Changes the signed-in user's own password and clears any "must change" flag. */
-export async function changeOwnPassword(currentPassword: string, newPassword: string): Promise<void> {
+async function changeOwnPasswordImpl(currentPassword: string, newPassword: string): Promise<void> {
   if (newPassword.length < 8) throw new Error('Use at least 8 characters for the new password.');
   if (newPassword === currentPassword) throw new Error('The new password must be different from the current one.');
   const { auth, db } = getFirebaseHandles();
@@ -511,7 +512,7 @@ export async function changeOwnPassword(currentPassword: string, newPassword: st
  * Sets a new password for the user who has just signed in through an e-mailed link
  * (no current password needed: the link itself proved they own the mailbox).
  */
-export async function setOwnPasswordAfterEmailLink(newPassword: string): Promise<void> {
+async function setOwnPasswordAfterEmailLinkImpl(newPassword: string): Promise<void> {
   if (newPassword.length < 8) throw new Error('Use at least 8 characters for the new password.');
   const { auth, db } = getFirebaseHandles();
   const user = auth?.currentUser;
@@ -558,7 +559,7 @@ export async function getRequire2fa(): Promise<boolean> {
 let previewRequire2fa = false;
 
 /** Super Admin: switch the 2FA requirement on or off. */
-export async function setRequire2fa(value: boolean, byEmail: string): Promise<void> {
+async function setRequire2faImpl(value: boolean, byEmail: string): Promise<void> {
   const { db, auth } = getFirebaseHandles();
   if (!db || !auth) {
     previewRequire2fa = value;
@@ -602,7 +603,7 @@ export function describePendingAction(pa: PendingAdminAction, whose: 'your' | 't
 }
 
 /** Super Admin: ask another Super Admin to confirm removing / blocking / demoting them. */
-export async function requestSuperAdminAction(
+async function requestSuperAdminActionImpl(
   target: CmsAccount,
   type: PendingAdminAction['type'],
   newRole: CmsRole | undefined,
@@ -633,7 +634,7 @@ export async function requestSuperAdminAction(
 }
 
 /** Super Admin: withdraw your own request. */
-export async function cancelSuperAdminAction(target: CmsAccount): Promise<void> {
+async function cancelSuperAdminActionImpl(target: CmsAccount): Promise<void> {
   const { db } = getFirebaseHandles();
   if (!db) {
     const cur = previewAccounts.get(target.uid);
@@ -648,7 +649,7 @@ export async function cancelSuperAdminAction(target: CmsAccount): Promise<void> 
 }
 
 /** The Super Admin concerned: approve or decline a request about their own account. */
-export async function answerMyPendingAction(pa: PendingAdminAction, approve: boolean): Promise<void> {
+async function answerMyPendingActionImpl(pa: PendingAdminAction, approve: boolean): Promise<void> {
   const { db, auth } = getFirebaseHandles();
   const uid = auth?.currentUser?.uid;
   if (!db || !uid) return; // preview mode
@@ -668,4 +669,117 @@ export async function answerMyPendingAction(pa: PendingAdminAction, approve: boo
   } catch (e) {
     throw new Error(friendlyError(e));
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Audit trail: every account action is recorded (ISO 27001 A.8.15: use of privileged rights).
+// A failed attempt is recorded too, then the error is passed on to the screen as before.
+// ---------------------------------------------------------------------------------------------
+
+async function audited<T>(
+  action: string,
+  targetId: string,
+  summary: string,
+  details: Record<string, any>,
+  run: () => Promise<T>
+): Promise<T> {
+  try {
+    const result = await run();
+    await logAudit(action, 'account', targetId, summary, details);
+    return result;
+  } catch (e: any) {
+    await logAudit(action, 'account', targetId, `FAILED: ${summary}`, { ...details, error: e?.message || String(e) }, { outcome: 'failure' });
+    throw e;
+  }
+}
+
+const who = (a: { email?: string; uid: string }) => a.email || a.uid;
+const roleLabel = (r?: CmsRole) => (r ? ROLE_INFO[r]?.label || r : '');
+
+export function addCmsAccount(input: AddAccountInput, invitedByEmail: string): Promise<AddAccountResult> {
+  const email = input.email.trim().toLowerCase();
+  return audited('account.added', email, `Added ${email} as ${roleLabel(input.role)}`, { after_role: roleLabel(input.role), newLogin: !input.existingUid }, () =>
+    addCmsAccountImpl(input, invitedByEmail)
+  );
+}
+
+export function setAccountRole(account: CmsAccount, role: CmsRole): Promise<void> {
+  return audited(
+    'account.role-changed',
+    who(account),
+    `Changed ${who(account)} from ${roleLabel(account.role)} to ${roleLabel(role)}`,
+    { before_role: roleLabel(account.role), after_role: roleLabel(role) },
+    () => setAccountRoleImpl(account, role)
+  );
+}
+
+export function setAccountBlocked(account: CmsAccount, blocked: boolean): Promise<void> {
+  return audited(blocked ? 'account.blocked' : 'account.unblocked', who(account), `${blocked ? 'Blocked' : 'Unblocked'} ${who(account)}`, {}, () =>
+    setAccountBlockedImpl(account, blocked)
+  );
+}
+
+export function setAccountTwoFactor(account: CmsAccount, mode: 'on' | 'off'): Promise<void> {
+  return audited(mode === 'on' ? 'account.2fa-on' : 'account.2fa-off', who(account), `${mode === 'on' ? 'Started' : 'Stopped'} 2FA for ${who(account)}`, {}, () =>
+    setAccountTwoFactorImpl(account, mode)
+  );
+}
+
+export function removeCmsAccount(account: CmsAccount): Promise<void> {
+  return audited('account.removed', who(account), `Removed CMS access for ${who(account)} (${roleLabel(account.role)})`, { before_role: roleLabel(account.role) }, () =>
+    removeCmsAccountImpl(account)
+  );
+}
+
+export async function sendAccountPasswordReset(email: string): Promise<boolean> {
+  const target = email.trim().toLowerCase();
+  const wasLocked = await audited('account.password-reset-sent', target, `Sent a password reset mail to ${target}`, {}, () =>
+    sendAccountPasswordResetImpl(email)
+  );
+  if (wasLocked) await logAudit('account.unlocked', 'account', target, `Unlocked ${target} (locked after 5 wrong passwords)`);
+  return wasLocked;
+}
+
+export function changeOwnPassword(currentPassword: string, newPassword: string): Promise<void> {
+  return audited('session.password-changed', currentActor()?.email || 'self', 'Changed own password', {}, () => changeOwnPasswordImpl(currentPassword, newPassword));
+}
+
+export async function setOwnPasswordAfterEmailLink(newPassword: string): Promise<void> {
+  await setOwnPasswordAfterEmailLinkImpl(newPassword);
+  await logAudit('session.password-changed', 'session', currentActor()?.email || 'self', 'Set a new password from the e-mailed link');
+}
+
+export function setRequire2fa(value: boolean, byEmail: string): Promise<void> {
+  return audited('settings.require-2fa', 'settings/security', value ? 'Switched 2FA on for everyone' : 'Switched 2FA off for everyone', { after_require2fa: value ? 'On' : 'Off' }, () =>
+    setRequire2faImpl(value, byEmail)
+  );
+}
+
+export function requestSuperAdminAction(
+  target: CmsAccount,
+  type: PendingAdminAction['type'],
+  newRole: CmsRole | undefined,
+  me: { uid: string; email: string }
+): Promise<void> {
+  const what = describePendingAction({ type, newRole } as PendingAdminAction);
+  return audited('account.request-sent', who(target), `Asked ${who(target)} to confirm: ${what}`, { request: what }, () =>
+    requestSuperAdminActionImpl(target, type, newRole, me)
+  );
+}
+
+export function cancelSuperAdminAction(target: CmsAccount): Promise<void> {
+  return audited('account.request-answered', who(target), `Withdrew the confirmation request for ${who(target)}`, { answer: 'Withdrawn' }, () =>
+    cancelSuperAdminActionImpl(target)
+  );
+}
+
+export async function answerMyPendingAction(pa: PendingAdminAction, approve: boolean): Promise<void> {
+  const what = describePendingAction(pa, 'your');
+  const requester = pa.requestedByEmail || '';
+  // Log first: approving a removal or block ends this user's own access
+  await logAudit('account.request-answered', 'account', currentActor()?.email || 'self', `${approve ? 'Approved' : 'Declined'} request from ${requester}: ${what}`, {
+    answer: approve ? 'Approved' : 'Declined',
+    requestedBy: requester
+  });
+  await answerMyPendingActionImpl(pa, approve);
 }

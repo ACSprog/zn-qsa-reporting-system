@@ -16,6 +16,7 @@ import {
   limit
 } from 'firebase/firestore';
 import { getFirebaseHandles } from './firebase';
+import { logAudit } from './audit';
 
 export type AnnouncementLevel = 'info' | 'notice' | 'warning' | 'critical';
 
@@ -115,7 +116,7 @@ export function subscribeAnnouncements(cb: (list: Announcement[]) => void): () =
 }
 
 /** Super Admin: create (no id) or update an announcement. */
-export async function saveAnnouncement(id: string | null, a: AnnouncementInput, byEmail: string): Promise<void> {
+async function saveAnnouncementImpl(id: string | null, a: AnnouncementInput, byEmail: string): Promise<void> {
   const message = a.message.trim().slice(0, 500);
   if (!message) throw new Error('Write the message first.');
   const { db } = getFirebaseHandles();
@@ -148,11 +149,14 @@ export async function saveAnnouncement(id: string | null, a: AnnouncementInput, 
 
 /** Super Admin: switch an announcement on or off without editing it. */
 export async function setAnnouncementActive(a: Announcement, active: boolean, byEmail: string): Promise<void> {
-  return saveAnnouncement(a.id, { ...a, active }, byEmail);
+  await saveAnnouncementImpl(a.id, { ...a, active }, byEmail);
+  await logAudit('announcement.switched', 'announcement', a.id, `Switched announcement ${active ? 'on' : 'off'}: "${a.message.slice(0, 80)}"`, {
+    after_active: active ? 'On' : 'Off'
+  });
 }
 
 /** Super Admin: delete an announcement. */
-export async function deleteAnnouncement(id: string): Promise<void> {
+async function deleteAnnouncementImpl(id: string): Promise<void> {
   const { db } = getFirebaseHandles();
   if (!db) {
     writePreview(readPreview().filter((x) => x.id !== id));
@@ -163,4 +167,19 @@ export async function deleteAnnouncement(id: string): Promise<void> {
   } catch (e: any) {
     throw new Error(e?.code === 'permission-denied' ? 'Permission denied.' : e?.message || 'Could not delete.');
   }
+}
+
+export async function saveAnnouncement(id: string | null, a: AnnouncementInput, byEmail: string): Promise<void> {
+  await saveAnnouncementImpl(id, a, byEmail);
+  await logAudit('announcement.saved', 'announcement', id || 'new', `${id ? 'Edited' : 'Created'} announcement (${a.level}): "${a.message.trim().slice(0, 80)}"`, {
+    message: a.message.trim().slice(0, 500),
+    level: a.level,
+    showFrom: a.showFrom ? a.showFrom.toISOString() : '',
+    showUntil: a.showUntil ? a.showUntil.toISOString() : ''
+  });
+}
+
+export async function deleteAnnouncement(id: string): Promise<void> {
+  await deleteAnnouncementImpl(id);
+  await logAudit('announcement.deleted', 'announcement', id, 'Deleted an announcement');
 }

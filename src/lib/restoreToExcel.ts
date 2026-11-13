@@ -5,6 +5,7 @@ import {
   fetchReportEvidence,
   fetchReporterIdentity
 } from './firebase';
+import { logAudit } from './audit';
 
 export interface RestoreResult {
   ok: boolean;
@@ -86,6 +87,10 @@ export async function restoreReportToExcel(report: BaseReportData): Promise<Rest
       };
     }
 
+    await logAudit('case.excel-sync', 'case', report.reportId, `Sent ${report.reportId} to the ${target} Excel sheet`, {
+      sheet: target,
+      reporterIdentityIncluded: !isAnonymous
+    });
     return {
       ok: true,
       message: 'Sent to Power Automate. Check the Excel workbook in a minute. This app cannot see the flow\u2019s reply.'

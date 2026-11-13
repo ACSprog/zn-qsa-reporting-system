@@ -157,6 +157,19 @@ firebase deploy --only hosting,firestore:rules
 
 ---
 
+### Audit trail
+
+Every CMS action is recorded in the append-only `auditLog` collection (who, when in server UTC,
+what changed before/after, outcome, device). Super Admins have an **Audit Log** page with filters,
+Excel export and review sign-off; Managers see each case's history and can export a **case audit
+pack** (PDF). Case changes are refused by the security rules unless their audit entry is saved with
+them, so publish the rules and the site together:
+
+    firebase deploy --only firestore:rules,hosting --project zn-qsa-reporting-system-test
+
+See [docs/AUDIT_TRAIL.md](docs/AUDIT_TRAIL.md) for the ISO/IEC 27001 control mapping, review
+procedure and how to answer audit queries.
+
 ## 3. Firebase Setup (Spark Plan)
 
 1. Open the [Firebase Console](https://console.firebase.google.com/) and create a new project (e.g. `zambia-airways-safety`).

@@ -52,6 +52,7 @@ import {
 } from '../types';
 import { stripIdentityIfAnonymous, getCategoryForForm } from './idGenerator';
 import { EXCEL_TABLE_FOR_FORM, buildExcelRow } from '../config/excelMapping';
+import { logAudit, addAuditToBatch, previewAudit } from './audit';
 
 /**
  * Local development against the Firebase Emulator Suite (npm run emulators).
@@ -565,6 +566,7 @@ export async function permanentlyDeleteReport(
     inMemoryStore.identities.delete(reportId);
     savePreviewStore();
     notifyInMemoryReportListeners();
+    await logAudit('case.deleted', 'case', reportId, `Permanently deleted ${reportId}`, { reason: reason.slice(0, 500), reportType: form });
     return { ok: true };
   }
   try {
@@ -580,9 +582,11 @@ export async function permanentlyDeleteReport(
     for (const n of ['1', '2', '3', '4', '5']) await deleteDoc(doc(db, form, reportId, 'evidence', n));
     await deleteDoc(doc(db, 'identities', reportId));
     await deleteDoc(doc(db, form, reportId));
+    await logAudit('case.deleted', 'case', reportId, `Permanently deleted ${reportId}`, { reason: reason.slice(0, 500), reportType: form });
     return { ok: true };
   } catch (e: any) {
     console.error('Permanent delete failed:', e);
+    await logAudit('case.deleted', 'case', reportId, `FAILED: permanently delete ${reportId}`, { reason: reason.slice(0, 500), error: e?.code || String(e) }, { outcome: 'failure' });
     return {
       ok: false,
       error:
@@ -596,6 +600,18 @@ export async function permanentlyDeleteReport(
 /** Why the last updateReportMetadata call failed (Firestore error code), for on-screen messages. */
 export let lastReportUpdateError: string | null = null;
 
+/** What to record in the audit trail for a case change */
+export interface CaseAudit {
+  action: string;
+  summary: string;
+  details?: Record<string, any>;
+}
+
+/**
+ * Changes a case and records it in the audit trail in ONE batch: both are saved or neither is
+ * (the security rules refuse a case change without its audit entry). A refused change is
+ * recorded too, as a failed attempt.
+ */
 export async function updateReportMetadata(
   form: FormType,
   reportId: string,
@@ -606,19 +622,25 @@ export async function updateReportMetadata(
     deletionRequest?: DeletionRequest;
     reclassifiedTo?: FormType | null;
     reclassification?: ReclassificationRecord;
-  }
+  },
+  audit: CaseAudit
 ): Promise<boolean> {
+  lastReportUpdateError = null;
   if (db) {
     try {
       const ref = doc(db, form, reportId);
       // null means "remove the field" (e.g. a case moved back to its original type)
       const firestoreUpdates: Record<string, any> = { ...updates };
       for (const [k, v] of Object.entries(firestoreUpdates)) if (v === null) firestoreUpdates[k] = deleteField();
-      await updateDoc(ref, firestoreUpdates);
+      const batch = writeBatch(db);
+      firestoreUpdates.auditRef = addAuditToBatch(batch, audit.action, reportId, audit.summary, audit.details);
+      batch.update(ref, firestoreUpdates);
+      await batch.commit();
       return true;
     } catch (e: any) {
       console.error('Failed to update report metadata:', e);
       lastReportUpdateError = e?.code || e?.message || 'unknown error';
+      await logAudit(audit.action, 'case', reportId, `FAILED: ${audit.summary}`, { ...audit.details, error: String(lastReportUpdateError) }, { outcome: 'failure' });
       return false;
     }
   } else {
@@ -629,15 +651,13 @@ export async function updateReportMetadata(
       inMemoryStore.reports.set(reportId, merged as BaseReportData);
       savePreviewStore();
       notifyInMemoryReportListeners();
+      previewAudit(audit.action, reportId, audit.summary, audit.details);
       return true;
     }
     return false;
   }
 }
 
-/**
- * Fetch reporter identity for a specific report
- */
 export async function fetchReporterIdentity(reportId: string): Promise<ReporterIdentity | null> {
   if (db) {
     try {
@@ -843,7 +863,11 @@ export async function requestReportDeletion(
     requestedAt: db ? serverTimestamp() : new Date().toISOString(),
     reason: trimmed.slice(0, 1000)
   };
-  const ok = await updateReportMetadata(report.form, report.reportId, { deletionRequest: request });
+  const ok = await updateReportMetadata(report.form, report.reportId, { deletionRequest: request }, {
+    action: 'case.archive-requested',
+    summary: `Asked for ${report.reportId} to be archived`,
+    details: { reason: trimmed.slice(0, 1000) }
+  });
   return ok ? { ok } : { ok, error: 'Could not send the request. You may not have permission, or a request is already pending.' };
 }
 
@@ -869,7 +893,11 @@ export async function reclassifyReport(
   };
   // Moving back to the type it was submitted as clears the override
   const reclassifiedTo = to === report.form ? null : to;
-  return updateReportMetadata(report.form, report.reportId, { reclassifiedTo, reclassification: record });
+  return updateReportMetadata(report.form, report.reportId, { reclassifiedTo, reclassification: record }, {
+    action: 'case.moved',
+    summary: `Moved ${report.reportId} from ${current} to ${to}`,
+    details: { before_reportType: current, after_reportType: to, reason: record.reason }
+  });
 }
 
 /** Manager: approve (archives the report) or reject a pending deletion request. */
@@ -887,7 +915,16 @@ export async function decideDeletionRequest(
     decidedByEmail: manager.email || '',
     decidedAt: db ? serverTimestamp() : new Date().toISOString()
   };
-  return updateReportMetadata(report.form, report.reportId, approve ? { deletionRequest: decided, deleted: true } : { deletionRequest: decided });
+  return updateReportMetadata(
+    report.form,
+    report.reportId,
+    approve ? { deletionRequest: decided, deleted: true } : { deletionRequest: decided },
+    {
+      action: approve ? 'case.archive-approved' : 'case.archive-rejected',
+      summary: `${approve ? 'Approved' : 'Rejected'} the archive request for ${report.reportId} (asked by ${current.requestedByEmail || 'unknown'})`,
+      details: { requestedBy: current.requestedByEmail || '', reason: current.reason || '' }
+    }
+  );
 }
 
 // In-memory mock session handlers for local preview mode
@@ -1157,4 +1194,10 @@ export function subscribeToAuthState(callback: (user: User | null) => void): () 
     const idx = mockAuthListeners.indexOf(callback);
     if (idx !== -1) mockAuthListeners.splice(idx, 1);
   };
+}
+
+/** Who is signed in right now (Firebase user, or the preview mock). Used by the audit trail. */
+export function currentActor(): { uid: string; email: string } | null {
+  const u: any = auth ? auth.currentUser : mockUser;
+  return u ? { uid: u.uid, email: u.email || '' } : null;
 }
