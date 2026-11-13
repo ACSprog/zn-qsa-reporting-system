@@ -102,6 +102,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
   const [previewImage, setPreviewImage] = useState<ProcessedEvidenceFile | null>(null);
 
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [caseIdCopied, setCaseIdCopied] = useState<boolean>(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   // Reset the drawer only when a DIFFERENT case is opened. Live updates to the same case
@@ -418,9 +419,31 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
           {/* Report type (Managers can move a case submitted under the wrong type) */}
           <div className="border border-slate-200 rounded-xl p-4 bg-white space-y-2">
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="text-xs">
-                <span className="font-bold uppercase tracking-wider text-slate-500">Report type: </span>
-                <span className="font-black text-slate-900">{FORMS_META[currentType].title}</span>
+              <div className="text-xs space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold uppercase tracking-wider text-slate-500">Case number: </span>
+                  <span className="font-mono font-black text-slate-900 text-sm">{report.reportId}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(report.reportId).then(
+                        () => {
+                          setCaseIdCopied(true);
+                          setTimeout(() => setCaseIdCopied(false), 1500);
+                        },
+                        () => undefined
+                      );
+                    }}
+                    title="Copy the case number"
+                    className="text-[11px] font-semibold px-2 py-0.5 rounded border border-slate-300 text-slate-600 hover:bg-slate-50"
+                  >
+                    {caseIdCopied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <div>
+                  <span className="font-bold uppercase tracking-wider text-slate-500">Report type: </span>
+                  <span className="font-black text-slate-900">{FORMS_META[currentType].title}</span>
+                </div>
               </div>
               {isManager && !report.deleted && !showMoveForm && (
                 <button
