@@ -305,10 +305,20 @@ service cloud.firestore {
       return request.resource.data.status in ['New', 'Under review', 'Action required', 'Closed'];
     }
 
+    // Audit trail (ISO 27001 A.8.15): every change to a case must write its audit entry in the
+    // same batch. The case stores the entry's id in auditRef; the entry must be brand new (written
+    // at this very request time) and about this case. One lookup (getAfter).
+    function caseAuditRecorded(reportId) {
+      let ref = request.resource.data.get('auditRef', '');
+      return ref is string && ref != '' && ref != resource.data.get('auditRef', '')
+        && getAfter(/databases/$(database)/documents/auditLog/$(ref)).data.targetId == reportId
+        && getAfter(/databases/$(database)/documents/auditLog/$(ref)).data.at == request.time;
+    }
+
     // An Officer asking a Manager to delete (archive) a report
     function isNewDeletionRequest() {
       let dr = request.resource.data.deletionRequest;
-      return reportChanges().hasOnly(['deletionRequest'])
+      return reportChanges().hasOnly(['deletionRequest', 'auditRef'])
         && resource.data.deleted == false
         && resource.data.get('deletionRequest', {'status': 'none'}).status != 'pending'
         && dr.keys().hasOnly(['status', 'requestedBy', 'requestedByEmail', 'requestedAt', 'reason'])
@@ -339,10 +349,12 @@ service cloud.firestore {
 
       // Viewers: no updates. Officers: status/notes, or a deletion request.
       // Managers: status/notes, archive/restore (deleted) and deciding deletion requests.
+      // Every change must carry its audit entry (caseAuditRecorded).
       allow update: if isReportForm(form) && validStatus() && (
-        (reportChanges().hasOnly(['status', 'notes']) && isOfficer())
-        || (isNewDeletionRequest() && isOfficer())
-        || (reportChanges().hasOnly(['status', 'notes', 'deleted', 'deletionRequest', 'reclassifiedTo', 'reclassification'])
+        (reportChanges().hasOnly(['status', 'notes', 'auditRef']) && caseAuditRecorded(reportId) && isOfficer())
+        || (isNewDeletionRequest() && caseAuditRecorded(reportId) && isOfficer())
+        || (reportChanges().hasOnly(['status', 'notes', 'deleted', 'deletionRequest', 'reclassifiedTo', 'reclassification', 'auditRef'])
+          && caseAuditRecorded(reportId)
           && request.resource.data.deleted is bool
           // Moving a case to another report type keeps its number; only current types allowed
           && request.resource.data.get('reclassifiedTo', 'hazard') in ['hazard', 'occurrence', 'concern']
@@ -351,7 +363,10 @@ service cloud.firestore {
 
       // Permanent deletion: Super Admins only (the CMS also deletes the evidence files and the
       // reporter's identity, and writes an audit record to caseDeletions/{reportId})
-      allow delete: if isReportForm(form) && isSuperAdmin();
+      // The deletion record must exist first, so a case can't disappear without a trace.
+      allow delete: if isReportForm(form)
+        && exists(/databases/$(database)/documents/caseDeletions/$(reportId))
+        && isSuperAdmin();
 
       // Evidence subcollection (1 to 5 files per report)
       match /evidence/{n} {
@@ -396,6 +411,46 @@ service cloud.firestore {
         && request.resource.data.deletedAt == request.time
         && request.resource.data.reason is string && request.resource.data.reason.size() <= 500
         && isSuperAdmin();
+      allow update, delete: if false;
+    }
+
+    // ---- Audit trail (ISO/IEC 27001:2022 A.8.15 Logging) ----
+    // Append-only: entries can be added but never changed or deleted, by anyone, including
+    // Super Admins. The time is set by Google's servers (A.8.17), the person by their sign-in.
+    function validAuditEntry() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['at', 'actorUid', 'actorEmail', 'actorRole', 'action', 'outcome', 'device',
+                               'targetType', 'targetId', 'summary', 'details'])
+        && d.at == request.time
+        && d.action is string && d.action.size() > 0 && d.action.size() <= 60
+        && d.outcome in ['success', 'failure']
+        && d.targetType in ['case', 'account', 'session', 'settings', 'announcement', 'export', 'audit']
+        && d.targetId is string && d.targetId.size() <= 200
+        && d.summary is string && d.summary.size() <= 1000
+        && d.device is string && d.device.size() <= 120
+        && d.actorRole is string && d.actorRole.size() <= 20
+        && d.actorEmail is string && d.actorEmail.size() <= 254
+        && d.details is map && d.details.keys().size() <= 20;
+    }
+
+    match /auditLog/{entryId} {
+      allow create: if validAuditEntry() && (
+        // A CMS user recording their own action, in their own name
+        (isSignedIn()
+          && request.resource.data.actorUid == request.auth.uid
+          && request.resource.data.actorEmail == request.auth.token.get('email', '')
+          && isAdmin())
+        // A failed sign-in (nobody is signed in): records the e-mail that was tried
+        || (request.resource.data.action == 'session.sign-in-failed'
+          && request.resource.data.actorUid == ''
+          && request.resource.data.actorRole == ''
+          && request.resource.data.outcome == 'failure'
+          && request.resource.data.targetType == 'session'
+          && request.resource.data.details.keys().size() <= 3)
+      );
+      // Need-to-know (A.5.15, A.8.3): Super Admins read everything; Managers only the history
+      // of cases (for the case panel and case audit packs)
+      allow read: if (resource.data.targetType == 'case' && isManager()) || isSuperAdmin();
       allow update, delete: if false;
     }
   }
